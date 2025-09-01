@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/routes_manager/routes.dart';
-
+import '../../../../db/database_helper.dart';
 
 class Login extends StatefulWidget {
   const Login({Key? key}) : super(key: key);
@@ -17,12 +17,56 @@ class _LoginState extends State<Login> {
   final TextEditingController _controllerPassword = TextEditingController();
 
   bool _obscurePassword = true;
+  bool _isLoading = false;
+
+  Future<void> _login() async {
+    if (_formKey.currentState?.validate() ?? false) {
+      setState(() {
+        _isLoading = true;
+      });
+
+      try {
+        final user = await DatabaseHelper.instance.loginUser(
+          username: _controllerUsername.text.trim(),
+          password: _controllerPassword.text,
+        );
+
+        if (user != null) {
+          // Login successful
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Welcome back, ${user['username']}!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          Navigator.pushReplacementNamed(context, Routes.HomePageRoute);
+        } else {
+          // Login failed
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Invalid username or password'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Login error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // For UI demo purposes, show Home directly if needed
-    // bool isLoggedIn = false; // placeholder, not used
-
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.primaryContainer,
       body: Form(
@@ -57,7 +101,6 @@ class _LoginState extends State<Login> {
                   if (value == null || value.isEmpty) {
                     return "Please enter username.";
                   }
-                  // UI-only: no Hive validation
                   return null;
                 },
               ),
@@ -88,9 +131,9 @@ class _LoginState extends State<Login> {
                   if (value == null || value.isEmpty) {
                     return "Please enter password.";
                   }
-                  // UI-only: no Hive validation
                   return null;
                 },
+                onFieldSubmitted: (_) => _login(),
               ),
               const SizedBox(height: 60),
               Column(
@@ -102,17 +145,10 @@ class _LoginState extends State<Login> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                     ),
-                    onPressed: () {
-                      if (_formKey.currentState?.validate() ?? false) {
-                        // UI-only: navigate to Home
-                        Navigator.pushReplacementNamed(
-                          context,
-                          Routes.SignInRoute
-
-                        );
-                      }
-                    },
-                    child: const Text("Login"),
+                    onPressed: _isLoading ? null : _login,
+                    child: _isLoading
+                        ? const CircularProgressIndicator()
+                        : const Text("Login"),
                   ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -121,7 +157,6 @@ class _LoginState extends State<Login> {
                       TextButton(
                         onPressed: () {
                           _formKey.currentState?.reset();
-                          // Navigate to Signup UI
                           Navigator.pushReplacementNamed(
                               context, Routes.SignUpRoute);
                         },

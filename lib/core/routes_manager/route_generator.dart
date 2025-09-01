@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shift_scheduling_app/core/routes_manager/routes.dart';
+import 'package:shift_scheduling_app/feature/Homepage/homePage.dart';
 import 'package:shift_scheduling_app/feature/addDoctor/presentation/widgets/addDoctorScreen.dart';
 import 'package:shift_scheduling_app/feature/signup/presentation/pages/signup.dart';
 
@@ -24,6 +25,8 @@ class RouteGenerator {
         return MaterialPageRoute(builder: (_) =>  SectionScheduleScreen());
         case Routes.ReceptionDataScreenRoute:
         return MaterialPageRoute(builder: (_) =>  ReceptionDataScreen());
+        case Routes.HomePageRoute:
+        return MaterialPageRoute(builder: (_) =>  HomePage());
 
     }
     return null;

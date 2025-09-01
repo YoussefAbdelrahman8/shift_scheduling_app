@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-
 import '../../../../core/routes_manager/routes.dart';
+import '../../../../db/database_helper.dart';
 
 class Signup extends StatefulWidget {
   const Signup({super.key});
@@ -18,10 +18,49 @@ class _SignupState extends State<Signup> {
   final TextEditingController _controllerUsername = TextEditingController();
   final TextEditingController _controllerEmail = TextEditingController();
   final TextEditingController _controllerPassword = TextEditingController();
-  final TextEditingController _controllerConfirmPassword =
-  TextEditingController();
+  final TextEditingController _controllerConfirmPassword = TextEditingController();
 
   bool _obscurePassword = true;
+  bool _isLoading = false;
+
+  Future<void> _signup() async {
+    if (_formKey.currentState?.validate() ?? false) {
+      setState(() {
+        _isLoading = true;
+      });
+
+      try {
+        await DatabaseHelper.instance.registerUser(
+          username: _controllerUsername.text.trim(),
+          email: _controllerEmail.text.trim(),
+          password: _controllerPassword.text,
+        );
+
+        // Registration successful
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account created successfully! Please login.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        _formKey.currentState?.reset();
+        Navigator.pushReplacementNamed(context, Routes.SignInRoute);
+
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Registration failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,11 +93,13 @@ class _SignupState extends State<Signup> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                validator: (String? value) {
+                validator: (String? value)  {
                   if (value == null || value.isEmpty) {
                     return "Please enter username.";
                   }
-                  // UI-only: no check for existing username
+                  if (value.length < 3) {
+                    return "Username must be at least 3 characters.";
+                  }
                   return null;
                 },
                 onEditingComplete: () => _focusNodeEmail.requestFocus(),
@@ -79,7 +120,7 @@ class _SignupState extends State<Signup> {
                   if (value == null || value.isEmpty) {
                     return "Please enter email.";
                   } else if (!(value.contains('@') && value.contains('.'))) {
-                    return "Invalid email";
+                    return "Invalid email format";
                   }
                   return null;
                 },
@@ -111,13 +152,12 @@ class _SignupState extends State<Signup> {
                 validator: (String? value) {
                   if (value == null || value.isEmpty) {
                     return "Please enter password.";
-                  } else if (value.length < 8) {
-                    return "Password must be at least 8 characters.";
+                  } else if (value.length < 6) {
+                    return "Password must be at least 6 characters.";
                   }
                   return null;
                 },
-                onEditingComplete: () =>
-                    _focusNodeConfirmPassword.requestFocus(),
+                onEditingComplete: () => _focusNodeConfirmPassword.requestFocus(),
               ),
               const SizedBox(height: 10),
               TextFormField(
@@ -144,12 +184,13 @@ class _SignupState extends State<Signup> {
                 ),
                 validator: (String? value) {
                   if (value == null || value.isEmpty) {
-                    return "Please enter password.";
+                    return "Please confirm your password.";
                   } else if (value != _controllerPassword.text) {
-                    return "Password doesn't match.";
+                    return "Passwords don't match.";
                   }
                   return null;
                 },
+                onFieldSubmitted: (_) => _signup(),
               ),
               const SizedBox(height: 50),
               Column(
@@ -161,35 +202,18 @@ class _SignupState extends State<Signup> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                     ),
-                    onPressed: () {
-                      if (_formKey.currentState?.validate() ?? false) {
-                        // UI-only: show success message
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            width: 200,
-                            backgroundColor:
-                            Theme.of(context).colorScheme.secondary,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            behavior: SnackBarBehavior.floating,
-                            content: const Text("Registered Successfully"),
-                          ),
-                        );
-
-                        _formKey.currentState?.reset();
-
-                        Navigator.pop(context); // go back to Login
-                      }
-                    },
-                    child: const Text("Register"),
+                    onPressed: _isLoading ? null : _signup,
+                    child: _isLoading
+                        ? const CircularProgressIndicator()
+                        : const Text("Register"),
                   ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Text("Already have an account?"),
                       TextButton(
-                        onPressed: () => Navigator.pushReplacementNamed(context, Routes.SignInRoute),
+                        onPressed: () => Navigator.pushReplacementNamed(
+                            context, Routes.SignInRoute),
                         child: const Text("Login"),
                       ),
                     ],

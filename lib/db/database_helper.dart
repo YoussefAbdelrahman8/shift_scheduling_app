@@ -2,6 +2,8 @@
 
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 
 class DatabaseHelper {
   // Singleton pattern
@@ -23,12 +25,24 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // Increased version for users table
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
   Future _onCreate(Database db, int version) async {
+    // Create users table
+    await db.execute('''
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE doctor (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,16 +63,17 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
-  CREATE TABLE reception_constraints (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    doctor_id INTEGER NOT NULL,
-    totalShifts INTEGER DEFAULT 0,
-    morningShifts INTEGER DEFAULT 0,
-    eveningShifts INTEGER DEFAULT 0,
-    fullTimeShifts INTEGER DEFAULT 0,
-    FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
-  )
-''');
+      CREATE TABLE reception_constraints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        doctor_id INTEGER NOT NULL,
+        totalShifts INTEGER DEFAULT 0,
+        morningShifts INTEGER DEFAULT 0,
+        eveningShifts INTEGER DEFAULT 0,
+        fullTimeShifts INTEGER DEFAULT 0,
+        FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE doctor_exceptions_days (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +93,106 @@ class DatabaseHelper {
         FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
       )
     ''');
+  }
+
+  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add users table for existing databases
+      await db.execute('''
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+  }
+
+  // ------------------- USER AUTHENTICATION -------------------
+
+  String _hashPassword(String password) {
+    var bytes = utf8.encode(password);
+    var digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
+  Future<int> registerUser({
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    final db = await database;
+
+    // Check if username already exists
+    final existingUsername = await db.query(
+      'users',
+      where: 'username = ?',
+      whereArgs: [username],
+    );
+
+    if (existingUsername.isNotEmpty) {
+      throw Exception('Username already exists');
+    }
+
+    // Check if email already exists
+    final existingEmail = await db.query(
+      'users',
+      where: 'email = ?',
+      whereArgs: [email],
+    );
+
+    if (existingEmail.isNotEmpty) {
+      throw Exception('Email already exists');
+    }
+
+    return await db.insert(
+      'users',
+      {
+        'username': username,
+        'email': email,
+        'password': _hashPassword(password),
+        'created_at': DateTime.now().toIso8601String(),
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>?> loginUser({
+    required String username,
+    required String password,
+  }) async {
+    final db = await database;
+    final hashedPassword = _hashPassword(password);
+
+    final result = await db.query(
+      'users',
+      where: 'username = ? AND password = ?',
+      whereArgs: [username, hashedPassword],
+      limit: 1,
+    );
+
+    return result.isNotEmpty ? result.first : null;
+  }
+
+  Future<bool> userExists(String username) async {
+    final db = await database;
+    final result = await db.query(
+      'users',
+      where: 'username = ?',
+      whereArgs: [username],
+    );
+    return result.isNotEmpty;
+  }
+
+  Future<bool> emailExists(String email) async {
+    final db = await database;
+    final result = await db.query(
+      'users',
+      where: 'email = ?',
+      whereArgs: [email],
+    );
+    return result.isNotEmpty;
   }
 
   // ------------------- INSERT DOCTOR -------------------
@@ -176,6 +291,7 @@ class DatabaseHelper {
       );
     }
   }
+
   Future<Map<String, dynamic>?> getReceptionConstraints(int doctorId) async {
     final db = await database;
     final result = await db.query(
@@ -186,6 +302,7 @@ class DatabaseHelper {
     );
     return result.isNotEmpty ? result.first : null;
   }
+
   // ------------------- DOCTOR EXCEPTIONS -------------------
   Future<int> insertDoctorExceptionDay({
     required int doctorId,
