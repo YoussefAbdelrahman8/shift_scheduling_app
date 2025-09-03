@@ -25,14 +25,13 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2, // Increased version for users table
+      version: 1,
       onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
     );
   }
 
   Future _onCreate(Database db, int version) async {
-    // Create users table
+    // ---------------- USERS ----------------
     await db.execute('''
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +42,7 @@ class DatabaseHelper {
       )
     ''');
 
+    // ---------------- DOCTORS ----------------
     await db.execute('''
       CREATE TABLE doctor (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,16 +52,17 @@ class DatabaseHelper {
       )
     ''');
 
+    // ---------------- SECTION SHIFTS ----------------
     await db.execute('''
       CREATE TABLE section_shifts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         doctor_id INTEGER NOT NULL,
         date TEXT NOT NULL,
-        shift TEXT NOT NULL,
         FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
       )
     ''');
 
+    // ---------------- RECEPTION CONSTRAINTS ----------------
     await db.execute('''
       CREATE TABLE reception_constraints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,55 +70,42 @@ class DatabaseHelper {
         totalShifts INTEGER DEFAULT 0,
         morningShifts INTEGER DEFAULT 0,
         eveningShifts INTEGER DEFAULT 0,
-        fullTimeShifts INTEGER DEFAULT 0,
         FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
       )
     ''');
 
+    // ---------------- DOCTOR REQUESTS ----------------
     await db.execute('''
-      CREATE TABLE doctor_exceptions_days (
+      CREATE TABLE doctor_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         doctor_id INTEGER NOT NULL,
         date TEXT NOT NULL,
-        shift TEXT NOT NULL,
+        shift TEXT NOT NULL CHECK (shift IN ('Morning', 'Evening')),
+        type TEXT NOT NULL CHECK (type IN ('wanted', 'exception')),
         FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
       )
     ''');
 
+    // ---------------- RECEPTION SCHEDULE ----------------
     await db.execute('''
       CREATE TABLE reception_schedule (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         doctor_id INTEGER NOT NULL,
         date TEXT NOT NULL,
-        shift TEXT NOT NULL,
+        shift TEXT NOT NULL CHECK (shift IN ('Morning', 'Evening')),
         FOREIGN KEY (doctor_id) REFERENCES doctor(id) ON DELETE CASCADE
       )
     ''');
   }
 
-  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // Add users table for existing databases
-      await db.execute('''
-        CREATE TABLE users (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          username TEXT UNIQUE NOT NULL,
-          email TEXT UNIQUE NOT NULL,
-          password TEXT NOT NULL,
-          created_at TEXT NOT NULL
-        )
-      ''');
-    }
-  }
-
-  // ------------------- USER AUTHENTICATION -------------------
-
+  // ------------------- PASSWORD HASHING -------------------
   String _hashPassword(String password) {
     var bytes = utf8.encode(password);
     var digest = sha256.convert(bytes);
     return digest.toString();
   }
 
+  // ------------------- USER AUTH -------------------
   Future<int> registerUser({
     required String username,
     required String email,
@@ -125,37 +113,18 @@ class DatabaseHelper {
   }) async {
     final db = await database;
 
-    // Check if username already exists
-    final existingUsername = await db.query(
-      'users',
-      where: 'username = ?',
-      whereArgs: [username],
-    );
+    final existingUsername = await db.query('users', where: 'username = ?', whereArgs: [username]);
+    if (existingUsername.isNotEmpty) throw Exception('Username already exists');
 
-    if (existingUsername.isNotEmpty) {
-      throw Exception('Username already exists');
-    }
+    final existingEmail = await db.query('users', where: 'email = ?', whereArgs: [email]);
+    if (existingEmail.isNotEmpty) throw Exception('Email already exists');
 
-    // Check if email already exists
-    final existingEmail = await db.query(
-      'users',
-      where: 'email = ?',
-      whereArgs: [email],
-    );
-
-    if (existingEmail.isNotEmpty) {
-      throw Exception('Email already exists');
-    }
-
-    return await db.insert(
-      'users',
-      {
-        'username': username,
-        'email': email,
-        'password': _hashPassword(password),
-        'created_at': DateTime.now().toIso8601String(),
-      },
-    );
+    return await db.insert('users', {
+      'username': username,
+      'email': email,
+      'password': _hashPassword(password),
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   Future<Map<String, dynamic>?> loginUser({
@@ -175,51 +144,25 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first : null;
   }
 
-  Future<bool> userExists(String username) async {
-    final db = await database;
-    final result = await db.query(
-      'users',
-      where: 'username = ?',
-      whereArgs: [username],
-    );
-    return result.isNotEmpty;
-  }
-
-  Future<bool> emailExists(String email) async {
-    final db = await database;
-    final result = await db.query(
-      'users',
-      where: 'email = ?',
-      whereArgs: [email],
-    );
-    return result.isNotEmpty;
-  }
-
-  // ------------------- INSERT DOCTOR -------------------
+  // ------------------- DOCTOR CRUD -------------------
   Future<int> insertDoctor({
     required String name,
     required String specialization,
     required String seniority,
   }) async {
     final db = await database;
-    return await db.insert(
-      'doctor',
-      {
-        'name': name,
-        'specialization': specialization,
-        'seniority': seniority,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    return await db.insert('doctor', {
+      'name': name,
+      'specialization': specialization,
+      'seniority': seniority,
+    });
   }
 
-  // ------------------- GET ALL DOCTORS -------------------
   Future<List<Map<String, dynamic>>> getAllDoctors() async {
     final db = await database;
     return await db.query('doctor');
   }
 
-  // ------------------- GET DOCTORS BY SPECIALIZATION -------------------
   Future<List<Map<String, dynamic>>> getDoctorsBySpecialization(String specialization) async {
     final db = await database;
     return await db.query(
@@ -229,21 +172,16 @@ class DatabaseHelper {
     );
   }
 
+  // ------------------- SECTION SHIFTS -------------------
   Future<int> insertSectionSchedule({
     required int doctorId,
     required String date,
-    required String shift,
   }) async {
     final db = await database;
-    return await db.insert(
-      'section_shifts',
-      {
-        'doctor_id': doctorId,
-        'date': date,
-        'shift': shift,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    return await db.insert('section_shifts', {
+      'doctor_id': doctorId,
+      'date': date,
+    });
   }
 
   Future<List<Map<String, dynamic>>> getAllSectionSchedules() async {
@@ -252,19 +190,24 @@ class DatabaseHelper {
   }
 
   // ------------------- RECEPTION CONSTRAINTS -------------------
+  Future<Map<String, dynamic>?> getReceptionConstraints(int doctorId) async {
+    final db = await database;
+    final result = await db.query(
+      'reception_constraints',
+      where: 'doctor_id = ?',
+      whereArgs: [doctorId],
+    );
+    return result.isNotEmpty ? result.first : null;
+  }
+
   Future<int> insertOrUpdateReceptionConstraints({
     required int doctorId,
     required int totalShifts,
     required int morningShifts,
     required int eveningShifts,
-    required int fullTimeShifts,
   }) async {
     final db = await database;
-    final existing = await db.query(
-      'reception_constraints',
-      where: 'doctor_id = ?',
-      whereArgs: [doctorId],
-    );
+    final existing = await db.query('reception_constraints', where: 'doctor_id = ?', whereArgs: [doctorId]);
 
     if (existing.isNotEmpty) {
       return await db.update(
@@ -273,83 +216,97 @@ class DatabaseHelper {
           'totalShifts': totalShifts,
           'morningShifts': morningShifts,
           'eveningShifts': eveningShifts,
-          'fullTimeShifts': fullTimeShifts,
         },
         where: 'doctor_id = ?',
         whereArgs: [doctorId],
       );
     } else {
-      return await db.insert(
-        'reception_constraints',
-        {
-          'doctor_id': doctorId,
-          'totalShifts': totalShifts,
-          'morningShifts': morningShifts,
-          'eveningShifts': eveningShifts,
-          'fullTimeShifts': fullTimeShifts,
-        },
-      );
+      return await db.insert('reception_constraints', {
+        'doctor_id': doctorId,
+        'totalShifts': totalShifts,
+        'morningShifts': morningShifts,
+        'eveningShifts': eveningShifts,
+      });
     }
   }
 
-  Future<Map<String, dynamic>?> getReceptionConstraints(int doctorId) async {
-    final db = await database;
-    final result = await db.query(
-      'reception_constraints',
-      where: 'doctor_id = ?',
-      whereArgs: [doctorId],
-      limit: 1,
-    );
-    return result.isNotEmpty ? result.first : null;
-  }
-
-  // ------------------- DOCTOR EXCEPTIONS -------------------
-  Future<int> insertDoctorExceptionDay({
+  // ------------------- DOCTOR REQUESTS -------------------
+  Future<int> insertDoctorRequest({
     required int doctorId,
     required String date,
     required String shift,
+    required String type, // "wanted" or "exception"
   }) async {
     final db = await database;
-    return await db.insert(
-      'doctor_exceptions_days',
-      {
-        'doctor_id': doctorId,
-        'date': date,
-        'shift': shift,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+    if (!['Morning', 'Evening'].contains(shift)) throw Exception('Invalid shift');
+    if (!['wanted', 'exception'].contains(type)) throw Exception('Invalid request type');
+
+    return await db.insert('doctor_requests', {
+      'doctor_id': doctorId,
+      'date': date,
+      'shift': shift,
+      'type': type,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getDoctorRequests(int doctorId, {String? type}) async {
+    final db = await database;
+    if (type != null) {
+      return await db.query('doctor_requests', where: 'doctor_id = ? AND type = ?', whereArgs: [doctorId, type]);
+    }
+    return await db.query('doctor_requests', where: 'doctor_id = ?', whereArgs: [doctorId]);
+  }
+
+  // New method to get only wanted days
+  Future<List<Map<String, dynamic>>> getDoctorWantedDays(int doctorId) async {
+    return await getDoctorRequests(doctorId, type: 'wanted');
+  }
+
+  // New method to get only exception days
+  Future<List<Map<String, dynamic>>> getDoctorExceptionDays(int doctorId) async {
+    return await getDoctorRequests(doctorId, type: 'exception');
+  }
+
+  // New method to delete specific requests
+  Future<int> deleteDoctorRequest(int requestId) async {
+    final db = await database;
+    return await db.delete(
+      'doctor_requests',
+      where: 'id = ?',
+      whereArgs: [requestId],
     );
   }
 
-  Future<List<Map<String, dynamic>>> getDoctorExceptions(int doctorId) async {
+  // New method to delete all requests for a doctor (optional)
+  Future<int> deleteAllDoctorRequests(int doctorId, {String? type}) async {
     final db = await database;
-    return await db.query(
-      'doctor_exceptions_days',
+    if (type != null) {
+      return await db.delete(
+        'doctor_requests',
+        where: 'doctor_id = ? AND type = ?',
+        whereArgs: [doctorId, type],
+      );
+    }
+    return await db.delete(
+      'doctor_requests',
       where: 'doctor_id = ?',
       whereArgs: [doctorId],
     );
   }
 
-  // Add to database_helper.dart
+  // ------------------- SCHEDULING DATA -------------------
   Future<Map<String, dynamic>> getDoctorSchedulingData(DateTime startDate, DateTime endDate) async {
     final db = await database;
 
-    // Get all doctors
     final doctors = await db.query('doctor');
-
-    // Get section shifts for the date range
     final sectionShifts = await db.query(
       'section_shifts',
       where: 'date BETWEEN ? AND ?',
       whereArgs: [startDate.toIso8601String(), endDate.toIso8601String()],
     );
-
-    // Get reception constraints
     final constraints = await db.query('reception_constraints');
-
-    // Get doctor exceptions
-    final exceptions = await db.query(
-      'doctor_exceptions_days',
+    final requests = await db.query(
+      'doctor_requests',
       where: 'date BETWEEN ? AND ?',
       whereArgs: [startDate.toIso8601String(), endDate.toIso8601String()],
     );
@@ -358,7 +315,7 @@ class DatabaseHelper {
       'doctors': doctors,
       'sectionShifts': sectionShifts,
       'constraints': constraints,
-      'exceptions': exceptions,
+      'requests': requests,
     };
   }
 }

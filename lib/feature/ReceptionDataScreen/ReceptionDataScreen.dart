@@ -14,39 +14,35 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
 
   int? _selectedDoctorId;
   List<Map<String, dynamic>> _doctors = [];
-  final List<String> shifts = ['Morning', 'Evening', 'Full Day'];
+  final List<String> shifts = ['Morning', 'Evening'];
 
   final TextEditingController _totalShiftsController = TextEditingController();
   final TextEditingController _morningShiftsController = TextEditingController();
   final TextEditingController _eveningShiftsController = TextEditingController();
-  final TextEditingController _fullTimeShiftsController = TextEditingController();
 
-  List<Map<String, dynamic>> _exceptionEntries = [];
   int _remainingShifts = 0;
+
+  // Separate lists for wanted + exception days
+  List<Map<String, dynamic>> _wantedEntries = [];
+  List<Map<String, dynamic>> _exceptionEntries = [];
 
   @override
   void initState() {
     super.initState();
     _loadAllDoctors();
-    _addExceptionField(); // Start with one exception field
     _totalShiftsController.addListener(_updateRemainingShifts);
     _morningShiftsController.addListener(_updateRemainingShifts);
     _eveningShiftsController.addListener(_updateRemainingShifts);
-    _fullTimeShiftsController.addListener(_updateRemainingShifts);
   }
 
   Future<void> _loadAllDoctors() async {
-    // Fetch all doctors from the database and create a mutable list
     _doctors = (await DatabaseHelper.instance.getAllDoctors()).toList();
 
-    // Fetch all doctors with existing constraints to filter them out
     final db = await DatabaseHelper.instance.database;
     final existingConstraints = await db.query('reception_constraints');
     final doctorsWithConstraints = existingConstraints.map((e) => e['doctor_id']).toList();
 
-    // Remove doctors who already have constraints from the mutable list
     _doctors.removeWhere((doc) => doctorsWithConstraints.contains(doc['id']));
-
     setState(() {});
   }
 
@@ -56,17 +52,25 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
       _totalShiftsController.text = constraints['totalShifts'].toString();
       _morningShiftsController.text = constraints['morningShifts'].toString();
       _eveningShiftsController.text = constraints['eveningShifts'].toString();
-      _fullTimeShiftsController.text = constraints['fullTimeShifts'].toString();
     } else {
       _totalShiftsController.clear();
       _morningShiftsController.clear();
       _eveningShiftsController.clear();
-      _fullTimeShiftsController.clear();
     }
     _updateRemainingShifts();
+
+    _wantedEntries.clear();
     _exceptionEntries.clear();
-    _addExceptionField();
     setState(() {});
+  }
+
+  void _addWantedField() {
+    setState(() {
+      _wantedEntries.add({
+        'dateController': TextEditingController(),
+        'shift': null,
+      });
+    });
   }
 
   void _addExceptionField() {
@@ -82,9 +86,8 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
     final int total = int.tryParse(_totalShiftsController.text) ?? 0;
     final int morning = int.tryParse(_morningShiftsController.text) ?? 0;
     final int evening = int.tryParse(_eveningShiftsController.text) ?? 0;
-    final int fullTime = int.tryParse(_fullTimeShiftsController.text) ?? 0;
 
-    int calculatedRemaining = total - (morning + evening + fullTime);
+    int calculatedRemaining = total - (morning + evening);
     setState(() {
       _remainingShifts = calculatedRemaining;
     });
@@ -102,12 +105,11 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
       final int total = int.tryParse(_totalShiftsController.text) ?? 0;
       final int morning = int.tryParse(_morningShiftsController.text) ?? 0;
       final int evening = int.tryParse(_eveningShiftsController.text) ?? 0;
-      final int fullTime = int.tryParse(_fullTimeShiftsController.text) ?? 0;
 
-      if ((morning + evening + fullTime) > total) {
+      if ((morning + evening) > total) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('The sum of morning, evening, and full-time shifts cannot exceed the total shifts.'),
+            content: Text('The sum of morning and evening shifts cannot exceed the total shifts.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -120,16 +122,32 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
         totalShifts: total,
         morningShifts: morning,
         eveningShifts: evening,
-        fullTimeShifts: fullTime,
       );
 
-      // Save Exceptions
-      for (var exception in _exceptionEntries) {
-        if ((exception['dateController'] as TextEditingController).text.isNotEmpty && exception['shift'] != null) {
-          await DatabaseHelper.instance.insertDoctorExceptionDay(
+      // Save Wanted Days
+      for (var wanted in _wantedEntries) {
+        final date = (wanted['dateController'] as TextEditingController).text;
+        final shift = wanted['shift'];
+        if (date.isNotEmpty && shift != null) {
+          await DatabaseHelper.instance.insertDoctorRequest(
             doctorId: _selectedDoctorId!,
-            date: (exception['dateController'] as TextEditingController).text,
-            shift: exception['shift']!,
+            date: date,
+            shift: shift,
+            type: "wanted",
+          );
+        }
+      }
+
+      // Save Exception Days
+      for (var exception in _exceptionEntries) {
+        final date = (exception['dateController'] as TextEditingController).text;
+        final shift = exception['shift'];
+        if (date.isNotEmpty && shift != null) {
+          await DatabaseHelper.instance.insertDoctorRequest(
+            doctorId: _selectedDoctorId!,
+            date: date,
+            shift: shift,
+            type: "exception",
           );
         }
       }
@@ -141,9 +159,7 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
         ),
       );
 
-      // Remove the doctor from the list of available doctors
       _doctors.removeWhere((doc) => doc['id'] == _selectedDoctorId);
-
       _resetForm();
     }
   }
@@ -153,28 +169,30 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
     _totalShiftsController.clear();
     _morningShiftsController.clear();
     _eveningShiftsController.clear();
-    _fullTimeShiftsController.clear();
     _updateRemainingShifts();
+
+    for (var wanted in _wantedEntries) {
+      (wanted['dateController'] as TextEditingController).dispose();
+    }
     for (var exception in _exceptionEntries) {
       (exception['dateController'] as TextEditingController).dispose();
     }
+
     setState(() {
       _selectedDoctorId = null;
+      _wantedEntries = [];
       _exceptionEntries = [];
     });
-    _addExceptionField();
   }
 
   @override
   void dispose() {
-    _totalShiftsController.removeListener(_updateRemainingShifts);
-    _morningShiftsController.removeListener(_updateRemainingShifts);
-    _eveningShiftsController.removeListener(_updateRemainingShifts);
-    _fullTimeShiftsController.removeListener(_updateRemainingShifts);
     _totalShiftsController.dispose();
     _morningShiftsController.dispose();
     _eveningShiftsController.dispose();
-    _fullTimeShiftsController.dispose();
+    for (var wanted in _wantedEntries) {
+      (wanted['dateController'] as TextEditingController).dispose();
+    }
     for (var exception in _exceptionEntries) {
       (exception['dateController'] as TextEditingController).dispose();
     }
@@ -212,77 +230,19 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
                   onChanged: (val) {
                     setState(() {
                       _selectedDoctorId = val;
-                      if (val != null) {
-                        _loadDataForDoctor(val);
-                      }
+                      if (val != null) _loadDataForDoctor(val);
                     });
                   },
                   validator: (val) => val == null ? 'Please select a doctor' : null,
                 ),
                 const SizedBox(height: 30),
+
                 if (_selectedDoctorId != null) ...[
-                  Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Reception Constraints',
-                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 20),
-                          _buildNumberField('Total Shifts', _totalShiftsController),
-                          _buildNumberField('Morning Shifts', _morningShiftsController),
-                          _buildNumberField('Evening Shifts', _eveningShiftsController),
-                          _buildNumberField('Full-time Shifts', _fullTimeShiftsController),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Remaining Shifts: $_remainingShifts',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: _remainingShifts < 0 ? Colors.red : Colors.green,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _buildConstraintsCard(),
                   const SizedBox(height: 30),
-                  Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Doctor Exceptions',
-                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 20),
-                          ..._buildExceptionWidgets(),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _addExceptionField,
-                              icon: const Icon(Icons.add),
-                              label: const Text('Add Exception Day'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.lightBlue,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _buildRequestCard("Doctor Wanted Days", _wantedEntries, _addWantedField),
+                  const SizedBox(height: 30),
+                  _buildRequestCard("Doctor Exception Days", _exceptionEntries, _addExceptionField),
                   const SizedBox(height: 30),
                   SizedBox(
                     width: double.infinity,
@@ -304,6 +264,66 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
     );
   }
 
+  Widget _buildConstraintsCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Reception Constraints", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            _buildNumberField('Total Shifts', _totalShiftsController),
+            _buildNumberField('Morning Shifts', _morningShiftsController),
+            _buildNumberField('Evening Shifts', _eveningShiftsController),
+            const SizedBox(height: 10),
+            Text(
+              'Remaining Shifts: $_remainingShifts',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: _remainingShifts < 0 ? Colors.red : Colors.green,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRequestCard(String title, List<Map<String, dynamic>> entries, VoidCallback onAdd) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            ..._buildRequestWidgets(entries),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add),
+                label: Text('Add ${title.split(" ").last}'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.lightBlue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildNumberField(String label, TextEditingController controller) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10.0),
@@ -318,23 +338,19 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
         validator: (val) {
-          if (val == null || val.isEmpty) {
-            return 'Please enter a value';
-          }
-          if (int.tryParse(val) == null) {
-            return 'Please enter a valid number';
-          }
+          if (val == null || val.isEmpty) return 'Please enter a value';
+          if (int.tryParse(val) == null) return 'Please enter a valid number';
           return null;
         },
       ),
     );
   }
 
-  List<Widget> _buildExceptionWidgets() {
-    return _exceptionEntries.asMap().entries.map((entry) {
+  List<Widget> _buildRequestWidgets(List<Map<String, dynamic>> entries) {
+    return entries.asMap().entries.map((entry) {
       int index = entry.key;
-      Map<String, dynamic> exceptionData = entry.value;
-      TextEditingController dateController = exceptionData['dateController'];
+      Map<String, dynamic> requestData = entry.value;
+      TextEditingController dateController = requestData['dateController'];
 
       return Padding(
         padding: const EdgeInsets.only(bottom: 15.0),
@@ -364,39 +380,37 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
                   fillColor: Colors.grey[100],
                   suffixIcon: const Icon(Icons.calendar_today),
                 ),
-                validator: (val) => val == null || val.isEmpty ? 'Required' : null,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               flex: 2,
               child: DropdownButtonFormField<String>(
+                isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Shift #${index + 1}',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   filled: true,
                   fillColor: Colors.grey[100],
                 ),
-                value: exceptionData['shift'],
+                value: requestData['shift'],
                 items: shifts.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
                 onChanged: (val) {
                   setState(() {
-                    _exceptionEntries[index]['shift'] = val;
+                    entries[index]['shift'] = val;
                   });
                 },
-                validator: (val) => val == null ? 'Required' : null,
               ),
             ),
-            if (_exceptionEntries.length > 1)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                onPressed: () {
-                  setState(() {
-                    dateController.dispose();
-                    _exceptionEntries.removeAt(index);
-                  });
-                },
-              ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () {
+                setState(() {
+                  dateController.dispose();
+                  entries.removeAt(index);
+                });
+              },
+            ),
           ],
         ),
       );

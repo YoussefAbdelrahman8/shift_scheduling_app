@@ -13,17 +13,16 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
 
   String? _selectedSpecialization;
   int? _selectedDoctorId;
-  final List<String> shifts = ['Morning', 'Evening', 'Full Day'];
 
   List<String> specializations = [];
   List<Map<String, dynamic>> doctors = [];
-  List<Map<String, dynamic>> shiftsToAdd = [];
+  List<TextEditingController> dateControllers = [];
 
   @override
   void initState() {
     super.initState();
     _loadSpecializations();
-    _addShiftField(); // Start with one shift field by default
+    _addDateField(); // Start with one date by default
   }
 
   Future<void> _loadSpecializations() async {
@@ -40,52 +39,48 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
     });
   }
 
-  void _addShiftField() {
+  void _addDateField() {
     setState(() {
-      shiftsToAdd.add({
-        'dateController': TextEditingController(),
-        'shift': null,
-      });
+      dateControllers.add(TextEditingController());
     });
   }
 
   Future<void> _saveAllSchedules() async {
     if (_formKey.currentState?.validate() ?? false) {
-      if (_selectedDoctorId != null && shiftsToAdd.isNotEmpty) {
-        bool allShiftsValid = true;
-        for (var shift in shiftsToAdd) {
-          if ((shift['dateController'] as TextEditingController).text.isEmpty || shift['shift'] == null) {
-            allShiftsValid = false;
+      if (_selectedDoctorId != null && dateControllers.isNotEmpty) {
+        bool allDatesValid = true;
+        for (var controller in dateControllers) {
+          if (controller.text.isEmpty) {
+            allDatesValid = false;
             break;
           }
         }
 
-        if (allShiftsValid) {
+        if (allDatesValid) {
           try {
-            for (var shift in shiftsToAdd) {
+            for (var controller in dateControllers) {
               await DatabaseHelper.instance.insertSectionSchedule(
                 doctorId: _selectedDoctorId!,
-                date: (shift['dateController'] as TextEditingController).text,
-                shift: shift['shift']!,
+                date: controller.text,
               );
             }
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('All shifts saved successfully!')),
+              const SnackBar(content: Text('All schedules saved successfully!')),
             );
             _resetForm();
           } catch (e) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to save shifts: $e')),
+              SnackBar(content: Text('Failed to save schedules: $e')),
             );
           }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Please fill all date and shift fields.')),
+            const SnackBar(content: Text('Please fill all date fields.')),
           );
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a doctor and add at least one shift.')),
+          const SnackBar(content: Text('Please select a doctor and add at least one date.')),
         );
       }
     }
@@ -93,21 +88,21 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
 
   void _resetForm() {
     _formKey.currentState?.reset();
-    for (var shift in shiftsToAdd) {
-      (shift['dateController'] as TextEditingController).dispose();
+    for (var controller in dateControllers) {
+      controller.dispose();
     }
     setState(() {
       _selectedSpecialization = null;
       _selectedDoctorId = null;
-      shiftsToAdd = [];
+      dateControllers = [];
     });
-    _addShiftField();
+    _addDateField();
   }
 
   @override
   void dispose() {
-    for (var shift in shiftsToAdd) {
-      (shift['dateController'] as TextEditingController).dispose();
+    for (var controller in dateControllers) {
+      controller.dispose();
     }
     super.dispose();
   }
@@ -169,15 +164,15 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
                     validator: (val) => val == null ? 'Please select a doctor' : null,
                   ),
                 const SizedBox(height: 20),
-                if (_selectedDoctorId != null) ..._buildShiftWidgets(),
+                if (_selectedDoctorId != null) ..._buildDateFields(),
                 const SizedBox(height: 20),
                 if (_selectedDoctorId != null)
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _addShiftField,
+                      onPressed: _addDateField,
                       icon: const Icon(Icons.add),
-                      label: const Text('Add Another Shift'),
+                      label: const Text('Add Another Date'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.lightBlue,
                         foregroundColor: Colors.white,
@@ -208,21 +203,18 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
     );
   }
 
-  List<Widget> _buildShiftWidgets() {
-    return shiftsToAdd.asMap().entries.map((entry) {
+  List<Widget> _buildDateFields() {
+    return dateControllers.asMap().entries.map((entry) {
       int index = entry.key;
-      Map<String, dynamic> shiftData = entry.value;
-      TextEditingController dateController = shiftData['dateController'];
+      TextEditingController controller = entry.value;
 
       return Padding(
         padding: const EdgeInsets.only(bottom: 20.0),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              flex: 3,
               child: TextFormField(
-                controller: dateController,
+                controller: controller,
                 readOnly: true,
                 onTap: () async {
                   DateTime? picked = await showDatePicker(
@@ -232,11 +224,11 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
                     lastDate: DateTime(2100),
                   );
                   if (picked != null) {
-                    dateController.text = picked.toIso8601String().split('T').first;
+                    controller.text = picked.toIso8601String().split('T').first;
                   }
                 },
                 decoration: InputDecoration(
-                  labelText: 'Shift Date #${index + 1}',
+                  labelText: 'Date #${index + 1}',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   filled: true,
                   fillColor: Colors.grey[100],
@@ -245,33 +237,13 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
                 validator: (val) => val == null || val.isEmpty ? 'Required' : null,
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
-              child: DropdownButtonFormField<String>(
-                decoration: InputDecoration(
-                  labelText: 'Shift #${index + 1}',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey[100],
-                ),
-                value: shiftData['shift'],
-                items: shifts.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                onChanged: (val) {
-                  setState(() {
-                    shiftsToAdd[index]['shift'] = val;
-                  });
-                },
-                validator: (val) => val == null ? 'Required' : null,
-              ),
-            ),
-            if (shiftsToAdd.length > 1)
+            if (dateControllers.length > 1)
               IconButton(
                 icon: const Icon(Icons.delete, color: Colors.red),
                 onPressed: () {
                   setState(() {
-                    dateController.dispose();
-                    shiftsToAdd.removeAt(index);
+                    controller.dispose();
+                    dateControllers.removeAt(index);
                   });
                 },
               ),
