@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../db/database_helper.dart';
+import '../../db/database_helper.dart';
 
 class SectionScheduleScreen extends StatefulWidget {
   const SectionScheduleScreen({Key? key}) : super(key: key);

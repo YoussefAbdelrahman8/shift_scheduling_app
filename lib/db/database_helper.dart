@@ -329,4 +329,36 @@ class DatabaseHelper {
       whereArgs: [doctorId],
     );
   }
+
+  // Add to database_helper.dart
+  Future<Map<String, dynamic>> getDoctorSchedulingData(DateTime startDate, DateTime endDate) async {
+    final db = await database;
+
+    // Get all doctors
+    final doctors = await db.query('doctor');
+
+    // Get section shifts for the date range
+    final sectionShifts = await db.query(
+      'section_shifts',
+      where: 'date BETWEEN ? AND ?',
+      whereArgs: [startDate.toIso8601String(), endDate.toIso8601String()],
+    );
+
+    // Get reception constraints
+    final constraints = await db.query('reception_constraints');
+
+    // Get doctor exceptions
+    final exceptions = await db.query(
+      'doctor_exceptions_days',
+      where: 'date BETWEEN ? AND ?',
+      whereArgs: [startDate.toIso8601String(), endDate.toIso8601String()],
+    );
+
+    return {
+      'doctors': doctors,
+      'sectionShifts': sectionShifts,
+      'constraints': constraints,
+      'exceptions': exceptions,
+    };
+  }
 }

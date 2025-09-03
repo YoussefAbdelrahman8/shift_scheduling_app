@@ -7,4 +7,5 @@ abstract class Routes{
   static const String insertSectionScheduleScreenRoute = "/SectionScreen";
   static const String ReceptionDataScreenRoute = "/ReceptionDataScreen";
   static const String HomePageRoute = "/HomePage";
+  static const String ReceptionScheduleGeneratorRoute = "/ReceptionScheduleGenerator";
   }

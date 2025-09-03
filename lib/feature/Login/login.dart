@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../../core/routes_manager/routes.dart';
-import '../../../../db/database_helper.dart';
+import '../../core/routes_manager/routes.dart';
+import '../../db/database_helper.dart';
 
 class Login extends StatefulWidget {
   const Login({Key? key}) : super(key: key);

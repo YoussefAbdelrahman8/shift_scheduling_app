@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../../../db/database_helper.dart';
+import '../../db/database_helper.dart';
 
 class ReceptionDataScreen extends StatefulWidget {
   const ReceptionDataScreen({Key? key}) : super(key: key);

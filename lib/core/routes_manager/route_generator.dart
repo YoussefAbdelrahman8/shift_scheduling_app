@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shift_scheduling_app/core/routes_manager/routes.dart';
 import 'package:shift_scheduling_app/feature/Homepage/homePage.dart';
-import 'package:shift_scheduling_app/feature/addDoctor/presentation/widgets/addDoctorScreen.dart';
-import 'package:shift_scheduling_app/feature/signup/presentation/pages/signup.dart';
+import 'package:shift_scheduling_app/feature/signup/signup.dart';
 
-import '../../feature/Login/presentation/pages/login.dart';
-import '../../feature/ReceptionDataScreen/presentation/widgets/ReceptionDataScreen.dart';
-import '../../feature/insertSecSchedules/presentation/widgets/SectionScheduleScreen.dart';
+import '../../feature/Login/login.dart';
+import '../../feature/ReceptionDataScreen/ReceptionDataScreen.dart';
+
+import '../../feature/insertDoctor/insertDoctorScreen.dart';
+import '../../feature/insertSecSchedules/SectionScheduleScreen.dart';
 
 
 class RouteGenerator {

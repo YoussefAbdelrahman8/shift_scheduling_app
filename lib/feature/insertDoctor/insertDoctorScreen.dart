@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../../core/routes_manager/routes.dart';
-import '../../../../db/database_helper.dart';
+import '../../core/routes_manager/routes.dart';
+import '../../db/database_helper.dart';
 
 class InsertDoctor extends StatefulWidget {
   const InsertDoctor({Key? key}) : super(key: key);
