@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../db/database_helper.dart';
+import 'package:provider/provider.dart';
+
+
+// Import your ScheduleSession provider
+// import 'path/to/schedule_session.dart';
 
 class ReceptionDataScreen extends StatefulWidget {
   const ReceptionDataScreen({Key? key}) : super(key: key);
@@ -13,7 +17,6 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
   final _formKey = GlobalKey<FormState>();
 
   int? _selectedDoctorId;
-  List<Map<String, dynamic>> _doctors = [];
   final List<String> shifts = ['Morning', 'Evening'];
 
   final TextEditingController _totalShiftsController = TextEditingController();
@@ -29,25 +32,16 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAllDoctors();
     _totalShiftsController.addListener(_updateRemainingShifts);
     _morningShiftsController.addListener(_updateRemainingShifts);
     _eveningShiftsController.addListener(_updateRemainingShifts);
   }
 
-  Future<void> _loadAllDoctors() async {
-    _doctors = (await DatabaseHelper.instance.getAllDoctors()).toList();
+  void _loadDataForDoctor(int doctorId) {
+    final session = Provider.of<ScheduleSession>(context, listen: false);
 
-    final db = await DatabaseHelper.instance.database;
-    final existingConstraints = await db.query('reception_constraints');
-    final doctorsWithConstraints = existingConstraints.map((e) => e['doctor_id']).toList();
-
-    _doctors.removeWhere((doc) => doctorsWithConstraints.contains(doc['id']));
-    setState(() {});
-  }
-
-  Future<void> _loadDataForDoctor(int doctorId) async {
-    final constraints = await DatabaseHelper.instance.getReceptionConstraints(doctorId);
+    // Load constraints from provider if they exist
+    final constraints = session.getReceptionConstraints(doctorId);
     if (constraints != null) {
       _totalShiftsController.text = constraints['totalShifts'].toString();
       _morningShiftsController.text = constraints['morningShifts'].toString();
@@ -57,10 +51,31 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
       _morningShiftsController.clear();
       _eveningShiftsController.clear();
     }
-    _updateRemainingShifts();
+
+    // Load wanted and exception days from provider
+    final wantedDays = session.getWantedDays(doctorId);
+    final exceptionDays = session.getExceptionDays(doctorId);
 
     _wantedEntries.clear();
     _exceptionEntries.clear();
+
+    // Reconstruct wanted entries
+    for (var day in wantedDays) {
+      _wantedEntries.add({
+        'dateController': TextEditingController(text: day['date']),
+        'shift': day['shift'],
+      });
+    }
+
+    // Reconstruct exception entries
+    for (var day in exceptionDays) {
+      _exceptionEntries.add({
+        'dateController': TextEditingController(text: day['date']),
+        'shift': day['shift'],
+      });
+    }
+
+    _updateRemainingShifts();
     setState(() {});
   }
 
@@ -116,41 +131,51 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
         return;
       }
 
-      // Save Constraints
-      await DatabaseHelper.instance.insertOrUpdateReceptionConstraints(
+      final session = Provider.of<ScheduleSession>(context, listen: false);
+
+      // Save Constraints to provider
+      session.saveReceptionConstraints(
         doctorId: _selectedDoctorId!,
         totalShifts: total,
         morningShifts: morning,
         eveningShifts: evening,
       );
 
-      // Save Wanted Days
+      // Prepare wanted days
+      List<Map<String, dynamic>> wantedDays = [];
       for (var wanted in _wantedEntries) {
         final date = (wanted['dateController'] as TextEditingController).text;
         final shift = wanted['shift'];
         if (date.isNotEmpty && shift != null) {
-          await DatabaseHelper.instance.insertDoctorRequest(
-            doctorId: _selectedDoctorId!,
-            date: date,
-            shift: shift,
-            type: "wanted",
-          );
+          wantedDays.add({
+            'date': date,
+            'shift': shift,
+          });
         }
       }
 
-      // Save Exception Days
+      // Prepare exception days
+      List<Map<String, dynamic>> exceptionDays = [];
       for (var exception in _exceptionEntries) {
         final date = (exception['dateController'] as TextEditingController).text;
         final shift = exception['shift'];
         if (date.isNotEmpty && shift != null) {
-          await DatabaseHelper.instance.insertDoctorRequest(
-            doctorId: _selectedDoctorId!,
-            date: date,
-            shift: shift,
-            type: "exception",
-          );
+          exceptionDays.add({
+            'date': date,
+            'shift': shift,
+          });
         }
       }
+
+      // Save doctor requests to provider
+      session.saveDoctorRequests(
+        doctorId: _selectedDoctorId!,
+        wantedDays: wantedDays,
+        exceptionDays: exceptionDays,
+      );
+
+      // Mark this doctor as having reception data
+      session.markDoctorAsHavingReceptionData(_selectedDoctorId!);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -159,7 +184,6 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
         ),
       );
 
-      _doctors.removeWhere((doc) => doc['id'] == _selectedDoctorId);
       _resetForm();
     }
   }
@@ -201,66 +225,68 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reception Schedule Data'),
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DropdownButtonFormField<int>(
-                  decoration: InputDecoration(
-                    labelText: 'Select Doctor',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    filled: true,
-                    fillColor: Colors.grey[100],
-                  ),
-                  value: _selectedDoctorId,
-                  items: _doctors.map((doc) {
-                    return DropdownMenuItem<int>(
-                      value: doc['id'] as int,
-                      child: Text(doc['name']),
-                    );
-                  }).toList(),
-                  onChanged: (val) {
-                    setState(() {
-                      _selectedDoctorId = val;
-                      if (val != null) _loadDataForDoctor(val);
-                    });
-                  },
-                  validator: (val) => val == null ? 'Please select a doctor' : null,
-                ),
-                const SizedBox(height: 30),
+    return Consumer<ScheduleSession>(
+      builder: (context, session, child) {
+        // Get available doctors (those without reception data)
+        final availableDoctors = session.getAvailableDoctorsForReception();
 
-                if (_selectedDoctorId != null) ...[
-                  _buildConstraintsCard(),
-                  const SizedBox(height: 30),
-                  _buildRequestCard("Doctor Wanted Days", _wantedEntries, _addWantedField),
-                  const SizedBox(height: 30),
-                  _buildRequestCard("Doctor Exception Days", _exceptionEntries, _addExceptionField),
-                  const SizedBox(height: 30),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _saveAllData,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      ),
-                      child: const Text('Save All Data', style: TextStyle(color: Colors.white, fontSize: 18)),
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<int>(
+                    decoration: InputDecoration(
+                      labelText: 'Select Doctor',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      filled: true,
+                      fillColor: Colors.grey[100],
                     ),
+                    value: _selectedDoctorId,
+                    items: availableDoctors.map((doc) {
+                      return DropdownMenuItem<int>(
+                        value: doc['id'] as int,
+                        child: Text(doc['name']),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedDoctorId = val;
+                        if (val != null) _loadDataForDoctor(val);
+                      });
+                    },
+                    validator: (val) => val == null ? 'Please select a doctor' : null,
                   ),
+                  const SizedBox(height: 30),
+
+                  if (_selectedDoctorId != null) ...[
+                    _buildConstraintsCard(),
+                    const SizedBox(height: 30),
+                    _buildRequestCard("Doctor Wanted Days", _wantedEntries, _addWantedField),
+                    const SizedBox(height: 30),
+                    _buildRequestCard("Doctor Exception Days", _exceptionEntries, _addExceptionField),
+                    const SizedBox(height: 30),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _saveAllData,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        ),
+                        child: const Text('Save All Data', style: TextStyle(color: Colors.white, fontSize: 18)),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

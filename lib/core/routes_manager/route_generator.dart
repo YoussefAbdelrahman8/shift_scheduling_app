@@ -5,6 +5,7 @@ import 'package:shift_scheduling_app/feature/Homepage/homePage.dart';
 import 'package:shift_scheduling_app/feature/signup/signup.dart';
 
 import '../../feature/Login/login.dart';
+import '../../feature/NewScheduleScreen/NewScheduleScreen.dart';
 import '../../feature/ReceptionDataScreen/ReceptionDataScreen.dart';
 
 import '../../feature/insertDoctor/insertDoctorScreen.dart';
@@ -16,10 +17,10 @@ class RouteGenerator {
     final args = settings.arguments;
     switch (settings.name) {
 
-        case Routes.SignInRoute:
-        return MaterialPageRoute(builder: (_) =>  Login());
-        case Routes.SignUpRoute:
-        return MaterialPageRoute(builder: (_) =>  Signup());
+        // case Routes.SignInRoute:
+        // return MaterialPageRoute(builder: (_) =>  Login());
+        // case Routes.SignUpRoute:
+        // return MaterialPageRoute(builder: (_) =>  Signup());
         case Routes.insertDoctorScreenRoute:
         return MaterialPageRoute(builder: (_) =>  InsertDoctor());
         case Routes.insertSectionScheduleScreenRoute:
@@ -28,6 +29,8 @@ class RouteGenerator {
         return MaterialPageRoute(builder: (_) =>  ReceptionDataScreen());
         case Routes.HomePageRoute:
         return MaterialPageRoute(builder: (_) =>  HomePage());
+        case Routes.NewScheduleScreenRoute:
+        return MaterialPageRoute(builder: (_) =>  NewScheduleScreen());
 
     }
     return null;

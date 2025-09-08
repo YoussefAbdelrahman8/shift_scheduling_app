@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../core/routes_manager/routes.dart';
-import '../../db/database_helper.dart';
+import 'package:shift_scheduling_app/core/models/Doctor.dart';
+import '../../db/DBHelper.dart';
+
 
 class InsertDoctor extends StatefulWidget {
   const InsertDoctor({Key? key}) : super(key: key);
@@ -137,14 +138,13 @@ class _InsertDoctorState extends State<InsertDoctor> {
 
                     // Insert into SQLite
                     int id = await DatabaseHelper.instance.insertDoctor(
-                      name: name,
-                      seniority: seniority,
-                      specialization: specialization,
+                      Doctor(name: name,
+                        seniority: seniority,
+                        specialization: specialization,)
+
                     );
 
-                    print('Doctor inserted with id: $id');
 
-                    // Optionally, navigate back or clear the form
                     _formKey.currentState?.reset();
                     setState(() {
                       _controllerName.clear();
@@ -155,18 +155,6 @@ class _InsertDoctorState extends State<InsertDoctor> {
                 },
                 child: const Text("Add Doctor"),
               ),
-
-              SizedBox(height: 20,),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pushNamed(
-                      context,
-                      Routes.insertSectionScheduleScreenRoute
-
-                  );
-                },
-                child: const Text('Go to Reception Schedule Data'),
-              )
             ],
           ),
         ),

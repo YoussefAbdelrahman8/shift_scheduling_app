@@ -1,91 +1,100 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import '../../../../core/routes_manager/routes.dart';
+import 'package:shift_scheduling_app/core/routes_manager/routes.dart';
+import 'package:shift_scheduling_app/feature/insertDoctor/insertDoctorScreen.dart';
 
-class HomePage extends StatelessWidget {
-  const HomePage({Key? key}) : super(key: key);
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int index = 0;
+
+  final tabs = [
+    const Center(child: Text("My Home Screen", style: TextStyle(fontSize: 18))),
+    const InsertDoctor(),
+  ];
 
   @override
   Widget build(BuildContext context) {
+
     return Scaffold(
+
       appBar: AppBar(
-        title: const Text('Hospital Management'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.blueAccent,
+        elevation: 0,
+        title: const Text(
+          "Welcome Back 👋",
+          style: TextStyle(color: Colors.white, fontSize: 19),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.account_circle, color: Colors.white),
+            onPressed: () {
+              setState(() => index = 1);
+            },
+          ),
+          IconButton(
             onPressed: () {
               Navigator.pushReplacementNamed(context, Routes.SignInRoute);
             },
-          ),
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+          )
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Welcome to Hospital Management System',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+
+      // 👇 Square Floating Action Button
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.cyan,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15), // 👈 makes it square
+        ),
+        child: const Icon(Icons.add_shopping_cart, color: Colors.white,size: 30,),
+        onPressed: () {
+          Navigator.pushNamed(context, Routes.NewScheduleScreenRoute);
+        },
+      ),
+
+      // 👇 Custom Notched App Bar to match square FAB
+      bottomNavigationBar: BottomAppBar(
+        padding: const EdgeInsets.only(bottom: 5),
+        color: Colors.green,
+        elevation: 0,
+        notchMargin: 8,
+        shape: const AutomaticNotchedShape(
+          RoundedRectangleBorder(borderRadius:BorderRadius.all(Radius.circular(100)) ), // outer shape
+          RoundedRectangleBorder( // 👈 makes notch rectangular
+            borderRadius: BorderRadius.all(Radius.circular(20)),
+          ),
+        ),
+        child: BottomNavigationBar(
+          iconSize: 30,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          currentIndex: index,
+          selectedItemColor: Colors.white,
+          unselectedItemColor: Colors.white70,
+          onTap: (i) => setState(() => index = i),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home),
+              label: "Home",
             ),
-            const SizedBox(height: 30),
-            Expanded(
-              child: ListView(
-                children: [
-                  _buildMenuItem(
-                    context,
-                    icon: Icons.person_add,
-                    title: 'Add Doctor',
-                    subtitle: 'Add new doctors to the system',
-                    onTap: () => Navigator.pushNamed(context, Routes.insertDoctorScreenRoute),
-                  ),
-                  const SizedBox(height: 15),
-                  _buildMenuItem(
-                    context,
-                    icon: Icons.schedule,
-                    title: 'Section Schedule',
-                    subtitle: 'Manage section shifts and schedules',
-                    onTap: () => Navigator.pushNamed(context, Routes.insertSectionScheduleScreenRoute),
-                  ),
-                  const SizedBox(height: 15),
-                  _buildMenuItem(
-                    context,
-                    icon: Icons.assignment,
-                    title: 'Reception Data',
-                    subtitle: 'Set reception constraints and exceptions',
-                    onTap: () => Navigator.pushNamed(context, Routes.ReceptionDataScreenRoute),
-                  ),
-                ],
-              ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.add_reaction_rounded),
+              label: "Add Doctor",
             ),
           ],
         ),
       ),
+
+      // 👇 Body
+      body: tabs[index],
     );
   }
 
-  Widget _buildMenuItem(
-      BuildContext context, {
-        required IconData icon,
-        required String title,
-        required String subtitle,
-        required VoidCallback onTap,
-      }) {
-    return Card(
-      child: ListTile(
-        leading: Icon(icon, color: Colors.blue, size: 30),
-        title: Text(
-          title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.arrow_forward_ios),
-        onTap: onTap,
-      ),
-    );
-  }
 }

@@ -1,15 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shift_scheduling_app/providers/ScheduleSession.dart';
+import 'package:shift_scheduling_app/providers/SchedulingSessionProvider.dart';
 import 'core/routes_manager/route_generator.dart';
 import 'core/routes_manager/routes.dart';
-import 'db/database_helper.dart';
+import 'db/DBHelper.dart';
+
 
 void main() async{
 
   WidgetsFlutterBinding.ensureInitialized();
+
   var db = DatabaseHelper.instance;
   await db.database;
 
-  runApp(const MyApp());
+  runApp(
+  ChangeNotifierProvider(
+      create: (context) => SchedulingSessionProvider(),
+      child: const MyApp()));
 
 }
 
@@ -21,7 +29,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       onGenerateRoute: RouteGenerator.getRoute,
-      initialRoute: Routes.SignInRoute,
+      initialRoute: Routes.HomePageRoute,
       title: 'Hospital Shift Scheduling',
       theme: ThemeData(
         primarySwatch: Colors.blue,

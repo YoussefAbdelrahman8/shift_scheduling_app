@@ -1,42 +1,38 @@
 import 'package:flutter/material.dart';
-import '../../db/database_helper.dart';
+import 'package:provider/provider.dart';
+import 'package:shift_scheduling_app/core/models/Doctor.dart';
+import 'package:shift_scheduling_app/providers/SchedulingSessionProvider.dart';
+import '../../db/DBHelper.dart';
+
 
 class SectionScheduleScreen extends StatefulWidget {
-  const SectionScheduleScreen({Key? key}) : super(key: key);
+  final VoidCallback? onSessionComplete;
+  const SectionScheduleScreen({Key? key, this.onSessionComplete}) : super(key: key);
 
   @override
-  State<SectionScheduleScreen> createState() => _SectionSchedulePageState();
+  State<SectionScheduleScreen> createState() => _SectionScheduleScreenState();
 }
 
-class _SectionSchedulePageState extends State<SectionScheduleScreen> {
+class _SectionScheduleScreenState extends State<SectionScheduleScreen> {
   final _formKey = GlobalKey<FormState>();
-
-  String? _selectedSpecialization;
-  int? _selectedDoctorId;
-
-  List<String> specializations = [];
-  List<Map<String, dynamic>> doctors = [];
   List<TextEditingController> dateControllers = [];
 
   @override
   void initState() {
     super.initState();
-    _loadSpecializations();
-    _addDateField(); // Start with one date by default
+    _addDateField();
   }
 
-  Future<void> _loadSpecializations() async {
-    final db = await DatabaseHelper.instance.database;
-    final result = await db.rawQuery('SELECT DISTINCT specialization FROM doctor');
-    specializations = result.map((row) => row['specialization'] as String).toList();
-    setState(() {});
-  }
+  Future<void> _loadDoctorsBySpecialization(
+      BuildContext context, String specialization) async {
+    final provider = Provider.of<SchedulingSessionProvider>(context, listen: false);
 
-  Future<void> _loadDoctorsBySpecialization(String specialization) async {
-    doctors = await DatabaseHelper.instance.getDoctorsBySpecialization(specialization);
-    setState(() {
-      _selectedDoctorId = null;
-    });
+    try {
+      final doctors = await DatabaseHelper.instance.getDoctorsBySpecialization(specialization);
+      provider.addDoctorsForSpecialization(doctors.cast<Doctor>());
+    } catch (e) {
+      _showError('Failed to load doctors: $e');
+    }
   }
 
   void _addDateField() {
@@ -45,58 +41,71 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
     });
   }
 
-  Future<void> _saveAllSchedules() async {
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  Future<void> _saveAllSchedules(BuildContext context) async {
+    final provider = Provider.of<SchedulingSessionProvider>(context, listen: false);
+
     if (_formKey.currentState?.validate() ?? false) {
-      if (_selectedDoctorId != null && dateControllers.isNotEmpty) {
-        bool allDatesValid = true;
-        for (var controller in dateControllers) {
-          if (controller.text.isEmpty) {
-            allDatesValid = false;
-            break;
-          }
-        }
+      if (provider.selectedDoctorId != null && dateControllers.isNotEmpty) {
+        bool allDatesValid = dateControllers.every((c) => c.text.isNotEmpty);
 
         if (allDatesValid) {
           try {
-            for (var controller in dateControllers) {
-              await DatabaseHelper.instance.insertSectionSchedule(
-                doctorId: _selectedDoctorId!,
-                date: controller.text,
-              );
+            // Collect all dates
+            List<String> dates = dateControllers
+                .map((controller) => controller.text)
+                .where((date) => date.isNotEmpty)
+                .toList();
+
+            if (dates.isEmpty) {
+              _showError('Please add at least one date.');
+              return;
             }
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('All schedules saved successfully!')),
-            );
-            _resetForm();
+
+            // Add section shifts for selected doctor
+            provider.addSectionShiftsForSelectedDoctor(dates);
+
+            // Reset date controllers
+            for (var c in dateControllers) {
+              c.dispose();
+            }
+            dateControllers = [];
+            _addDateField();
+
+            _showSuccess('Section shifts added successfully!');
+
+            // Check if all specializations are completed
+            if (provider.isAllSpecializationsCompleted && widget.onSessionComplete != null) {
+              widget.onSessionComplete!();
+            }
+
           } catch (e) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to save schedules: $e')),
-            );
+            _showError('Failed to save schedules: $e');
           }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Please fill all date fields.')),
-          );
+          _showError('Please fill all date fields.');
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a doctor and add at least one date.')),
-        );
+        _showError('Please select a doctor and add at least one date.');
       }
     }
-  }
-
-  void _resetForm() {
-    _formKey.currentState?.reset();
-    for (var controller in dateControllers) {
-      controller.dispose();
-    }
-    setState(() {
-      _selectedSpecialization = null;
-      _selectedDoctorId = null;
-      dateControllers = [];
-    });
-    _addDateField();
   }
 
   @override
@@ -109,97 +118,197 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Add Section Schedule')),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                DropdownButtonFormField<String>(
-                  decoration: InputDecoration(
-                    labelText: 'Select Specialization',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    filled: true,
-                    fillColor: Colors.grey[100],
+    return Consumer<SchedulingSessionProvider>(
+      builder: (context, provider, _) {
+        // Check if session is active
+        if (!provider.isSessionActive) {
+          return const Center(
+            child: Text('No active session. Please start a new schedule.'),
+          );
+        }
+
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Session info
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Creating Schedule for: ${provider.currentMonth}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Specializations remaining: ${provider.specializations.length}',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                        Text(
+                          'Section shifts added: ${provider.sectionShifts.length}',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
                   ),
-                  value: _selectedSpecialization,
-                  items: specializations.map((spec) {
-                    return DropdownMenuItem<String>(
-                      value: spec,
-                      child: Text(spec),
-                    );
-                  }).toList(),
-                  onChanged: (val) {
-                    setState(() {
-                      _selectedSpecialization = val;
-                      _loadDoctorsBySpecialization(val!);
-                    });
-                  },
-                  validator: (val) => val == null ? 'Please select a specialization' : null,
-                ),
-                const SizedBox(height: 20),
-                if (_selectedSpecialization != null)
-                  DropdownButtonFormField<int>(
+                  const SizedBox(height: 24),
+
+                  /// Specialization Dropdown
+                  DropdownButtonFormField<String>(
                     decoration: InputDecoration(
-                      labelText: 'Select Doctor',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      labelText: 'Select Specialization',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
                       filled: true,
                       fillColor: Colors.grey[100],
                     ),
-                    value: _selectedDoctorId,
-                    items: doctors.map((doc) {
-                      return DropdownMenuItem<int>(
-                        value: doc['id'] as int,
-                        child: Text(doc['name']),
+                    value: provider.selectedSpecialization,
+                    items: provider.specializations.map((spec) {
+                      return DropdownMenuItem<String>(
+                        value: spec,
+                        child: Text(spec),
                       );
                     }).toList(),
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedDoctorId = val;
-                      });
+                    onChanged: (val) async {
+                      if (val != null) {
+                        await provider.setSelectedSpecialization(val);
+                        await _loadDoctorsBySpecialization(context, val);
+                      }
                     },
-                    validator: (val) => val == null ? 'Please select a doctor' : null,
+                    validator: (val) =>
+                    val == null ? 'Please select a specialization' : null,
                   ),
-                const SizedBox(height: 20),
-                if (_selectedDoctorId != null) ..._buildDateFields(),
-                const SizedBox(height: 20),
-                if (_selectedDoctorId != null)
+                  const SizedBox(height: 20),
+
+                  /// Doctor Dropdown
+                  if (provider.selectedSpecialization != null)
+                    DropdownButtonFormField<int>(
+                      decoration: InputDecoration(
+                        labelText: 'Select Doctor',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                      ),
+                      value: provider.selectedDoctorId,
+                      items: provider.doctorsForSelectedSpecialization.map((doctor) {
+                        return DropdownMenuItem<int>(
+                          value: doctor.id,
+                          child: Text(doctor.name),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        provider.setSelectedDoctorId(val);
+                      },
+                      validator: (val) =>
+                      val == null ? 'Please select a doctor' : null,
+                    ),
+                  const SizedBox(height: 20),
+
+                  /// Date fields
+                  if (provider.selectedDoctorId != null) ..._buildDateFields(),
+
+                  const SizedBox(height: 20),
+
+                  /// Add another date button
+                  if (provider.selectedDoctorId != null)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _addDateField,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add Another Date'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.lightBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+
+                  const SizedBox(height: 30),
+
+                  /// Save button
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _addDateField,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Another Date'),
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: provider.selectedDoctorId != null
+                          ? () => _saveAllSchedules(context)
+                          : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.lightBlue,
-                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.blueAccent,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20)),
+                        disabledBackgroundColor: Colors.grey[300],
+                      ),
+                      child: const Text(
+                        'Save Section Shifts',
+                        style: TextStyle(fontSize: 18, color: Colors.white),
                       ),
                     ),
                   ),
-                const SizedBox(height: 30),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _saveAllSchedules,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+
+                  const SizedBox(height: 20),
+
+                  /// Progress indicator
+                  if (provider.specializations.isNotEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Remaining Specializations:',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: provider.specializations.map((spec) {
+                              final isSelected = spec == provider.selectedSpecialization;
+                              return Chip(
+                                label: Text(spec),
+                                backgroundColor: isSelected
+                                    ? Colors.blue
+                                    : Colors.grey[200],
+                                labelStyle: TextStyle(
+                                  color: isSelected ? Colors.white : Colors.black,
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: const Text(
-                      'Save Schedules',
-                      style: TextStyle(fontSize: 18, color: Colors.white),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -224,17 +333,20 @@ class _SectionSchedulePageState extends State<SectionScheduleScreen> {
                     lastDate: DateTime(2100),
                   );
                   if (picked != null) {
-                    controller.text = picked.toIso8601String().split('T').first;
+                    controller.text =
+                        picked.toIso8601String().split('T').first;
                   }
                 },
                 decoration: InputDecoration(
                   labelText: 'Date #${index + 1}',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   filled: true,
                   fillColor: Colors.grey[100],
                   suffixIcon: const Icon(Icons.calendar_today),
                 ),
-                validator: (val) => val == null || val.isEmpty ? 'Required' : null,
+                validator: (val) =>
+                val == null || val.isEmpty ? 'Required' : null,
               ),
             ),
             if (dateControllers.length > 1)
