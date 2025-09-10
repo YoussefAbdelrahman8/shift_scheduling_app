@@ -519,16 +519,10 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
             children: [
               // Expand/Collapse Control
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Text(
-                      'Organized by Specialization',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
                     TextButton.icon(
                       onPressed: () => setState(() => _isExpanded = !_isExpanded),
                       icon: Icon(_isExpanded ? Icons.expand_less : Icons.expand_more),
@@ -620,16 +614,11 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                                 ),
                                 DataColumn(
                                   label: Text(
-                                    'Shift Dates',
+                                    'Shift Dates (Click to Edit/Delete)',
                                     style: TextStyle(fontWeight: FontWeight.bold),
                                   ),
                                 ),
-                                DataColumn(
-                                  label: Text(
-                                    'Actions',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                ),
+                                // Removed Actions column since dates are now clickable
                               ],
                               rows: doctorShifts.entries.map((entry) {
                                 final doctor = entry.key;
@@ -675,76 +664,74 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                                         ),
                                       ),
                                     ),
+                                    // New clickable dates implementation
                                     DataCell(
                                       Container(
-                                        constraints: const BoxConstraints(maxWidth: 200),
-                                        child: Wrap(
-                                          spacing: 4,
-                                          runSpacing: 4,
-                                          children: doctorShiftsList.map((shift) {
-                                            return Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: Colors.green[100],
-                                                borderRadius: BorderRadius.circular(8),
-                                                border: Border.all(color: Colors.green[300]!),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.event,
-                                                    size: 14,
-                                                    color: Colors.green[700],
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    shift.date,
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight: FontWeight.w500,
-                                                      color: Colors.green[700],
+                                        width: 400,
+                                        height: 50, // Fixed height to prevent row expansion
+                                        child: SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal, // Allow horizontal scrolling
+                                          child: Row( // Use Row instead of Wrap to keep everything in one line
+                                            children: doctorShiftsList.asMap().entries.map((entry) {
+                                              final index = entry.key;
+                                              final shift = entry.value;
+                                              return Container(
+                                                margin: EdgeInsets.only(
+                                                  right: index < doctorShiftsList.length - 1 ? 8 : 0, // Space between chips
+                                                ),
+                                                child: GestureDetector(
+                                                  onTap: () => _showShiftActionDialog(context, shift, doctor),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.green[100],
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      border: Border.all(color: Colors.green[300]!),
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: Colors.green.withOpacity(0.1),
+                                                          blurRadius: 2,
+                                                          offset: const Offset(0, 1),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.event,
+                                                          size: 14,
+                                                          color: Colors.green[700],
+                                                        ),
+                                                        const SizedBox(width: 6),
+                                                        Text(
+                                                          shift.date,
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.w500,
+                                                            color: Colors.green[700],
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 4),
+                                                        Icon(
+                                                          Icons.touch_app,
+                                                          size: 12,
+                                                          color: Colors.green[600],
+                                                        ),
+                                                      ],
                                                     ),
                                                   ),
-                                                ],
-                                              ),
-                                            );
-                                          }).toList(),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: doctorShiftsList.map((shift) {
-                                          return Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              IconButton(
-                                                icon: const Icon(Icons.edit, size: 18),
-                                                color: Colors.blue,
-                                                onPressed: () => _editShiftDate(shift, doctor),
-                                                tooltip: 'Edit ${shift.date}',
-                                                padding: const EdgeInsets.all(4),
-                                                constraints: const BoxConstraints(),
-                                              ),
-                                              IconButton(
-                                                icon: const Icon(Icons.delete, size: 18),
-                                                color: Colors.red,
-                                                onPressed: () => _deleteShift(shift, doctor),
-                                                tooltip: 'Delete ${shift.date}',
-                                                padding: const EdgeInsets.all(4),
-                                                constraints: const BoxConstraints(),
-                                              ),
-                                            ],
-                                          );
-                                        }).toList(),
                                       ),
                                     ),
                                   ],
                                 );
                               }).toList(),
-                            ),
+                            )
                           ),
                       ],
                     ),
@@ -759,18 +746,6 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(context);
-                        },
-                        icon: const Icon(Icons.arrow_back),
-                        label: const Text('Add More Shifts'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                      ),
-                    ),
                     const SizedBox(width: 16),
                     Expanded(
                       flex: 2,
@@ -797,6 +772,61 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
     );
   }
 
+// Add this new method to handle the shift action dialog:
+  void _showShiftActionDialog(BuildContext context, SectionShift shift, Doctor doctor) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Manage Shift'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Doctor: ${doctor.name}'),
+            const SizedBox(height: 8),
+            Text('Date: ${shift.date}'),
+            const SizedBox(height: 16),
+            Text(
+              'What would you like to do?',
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[700],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _editShiftDate(shift, doctor);
+            },
+            icon: const Icon(Icons.edit, size: 18),
+            label: const Text('Edit Date'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.blue,
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteShift(shift, doctor);
+            },
+            icon: const Icon(Icons.delete, size: 18),
+            label: const Text('Delete'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
   Color _getSeniorityColor(String seniority) {
     switch (seniority.toLowerCase()) {
       case 'junior':
