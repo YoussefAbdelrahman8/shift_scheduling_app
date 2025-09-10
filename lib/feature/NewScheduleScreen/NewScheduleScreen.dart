@@ -145,6 +145,20 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
   void _onStepCompleted(ScheduleStep step) {
     final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
     provider.markStepCompleted(step, true);
+
+    // FIXED: Automatically advance to next step after completion
+    if (provider.canGoToNextStep) {
+      provider.goToNextStep();
+    }
+  }
+
+  // ADDED: Check if current step allows proceeding to next
+  bool _canProceedToNext(ScheduleSessionProvider provider) {
+    final currentStep = provider.currentStep;
+    final isCurrentStepCompleted = provider.stepCompletionStatus[currentStep] ?? false;
+
+    // Allow proceeding if current step is completed OR if it's an intermediate review step
+    return isCurrentStepCompleted || provider.canGoToNextStep;
   }
 
   @override
@@ -197,15 +211,15 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
             isActive: provider.currentStepIndex >= 1,
             state: _getStepState(ScheduleStep.viewSectionShifts, provider),
           ),
-          // Step(
-          //   title: Text(stepNames[2]),
-          //   subtitle: Text(stepDescriptions[2]),
-          //   content: ReceptionDataScreen(
-          //     onConstraintsComplete: () => _onStepCompleted(ScheduleStep.enterDoctorConstraints),
-          //   ),
-          //   isActive: provider.currentStepIndex >= 2,
-          //   state: _getStepState(ScheduleStep.enterDoctorConstraints, provider),
-          // ),
+          Step(
+            title: Text(stepNames[2]),
+            subtitle: Text(stepDescriptions[2]),
+            content: ReceptionDataScreen(
+              onConstraintsComplete: () => _onStepCompleted(ScheduleStep.enterDoctorConstraints),
+            ),
+            isActive: provider.currentStepIndex >= 2,
+            state: _getStepState(ScheduleStep.enterDoctorConstraints, provider),
+          ),
           // Step(
           //   title: Text(stepNames[3]),
           //   subtitle: Text(stepDescriptions[3]),
@@ -375,15 +389,16 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
                     type: StepperType.vertical,
                     currentStep: provider.currentStepIndex,
                     onStepTapped: _handleStepTap,
+                    // FIXED: Custom controls that properly connect to provider navigation
                     controlsBuilder: (context, details) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 16),
                         child: Row(
                           children: [
                             // Previous/Cancel Button
-                            if (details.onStepCancel != null)
+                            if (provider.currentStepIndex > 0 || provider.currentStepIndex == 0)
                               OutlinedButton.icon(
-                                onPressed: details.onStepCancel,
+                                onPressed: () => _handleStepCancel(), // Use our custom method
                                 icon: Icon(provider.currentStepIndex == 0 ? Icons.close : Icons.arrow_back),
                                 label: Text(provider.currentStepIndex == 0 ? 'Cancel' : 'Previous'),
                               ),
@@ -392,7 +407,8 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
 
                             // Next/Finish Button
                             ElevatedButton.icon(
-                              onPressed: details.onStepContinue,
+                              // FIXED: Enable button based on proper logic
+                              onPressed: _canProceedToNext(provider) ? () => _handleStepContinue() : null,
                               icon: Icon(
                                 provider.currentStepIndex == steps.length - 1
                                     ? Icons.check
@@ -408,6 +424,9 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
                                     ? Colors.green
                                     : Colors.blue,
                                 foregroundColor: Colors.white,
+                                // FIXED: Visual feedback for disabled state
+                                disabledBackgroundColor: Colors.grey,
+                                disabledForegroundColor: Colors.white54,
                               ),
                             ),
                           ],

@@ -274,14 +274,14 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
         print('📋 Shifts: ${provider.currentSessionSectionShifts.length}');
         print('👥 Doctors: ${provider.allDoctors.length}');
 
-        // FIXED: Don't use Column with Expanded - use a simple Column with constrained height
+        // INCREASED HEIGHT: Changed maxHeight from 600 to 800
         return ConstrainedBox(
           constraints: const BoxConstraints(
-            minHeight: 200,
-            maxHeight: 600, // Set a reasonable max height for the stepper
+            minHeight: 300,
+            maxHeight: 800, // Increased from 600
           ),
           child: Column(
-            mainAxisSize: MainAxisSize.min, // Important: Use min size
+            mainAxisSize: MainAxisSize.min,
             children: [
               // Debug Info (only in debug mode)
               _buildDebugInfo(provider),
@@ -446,61 +446,63 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header Section
+          // Header Section - MADE BIGGER
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.symmetric(horizontal: 6,vertical: 20), // Increased from 20
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [Colors.blue[600]!, Colors.blue[400]!],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16), // Increased from 12
             ),
             child: Column(
               children: [
                 Text(
                   'Section Shifts Review',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  style: Theme.of(context).textTheme.headlineLarge?.copyWith( // Changed from headlineMedium
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12), // Increased from 8
                 Text(
                   _formatMonthYear(provider.currentMonth ?? ''),
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith( // Changed from titleLarge
                     color: Colors.white70,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20), // Increased from 16
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), // Increased padding
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(24), // Increased from 20
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.assignment_turned_in, color: Colors.white, size: 20),
-                      const SizedBox(width: 8),
+                      const Icon(Icons.assignment_turned_in, color: Colors.white, size: 24), // Increased from 20
+                      const SizedBox(width: 12), // Increased from 8
                       Text(
                         '${shifts.length} Total Shifts',
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
+                          fontSize: 16, // Added explicit font size
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      const Icon(Icons.people, color: Colors.white, size: 20),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 24), // Increased from 16
+                      const Icon(Icons.people, color: Colors.white, size: 24), // Increased from 20
+                      const SizedBox(width: 12), // Increased from 8
                       Text(
                         '${provider.getUniqueDoctorsWithShifts().length} Doctors',
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
+                          fontSize: 16, // Added explicit font size
                         ),
                       ),
                     ],
@@ -510,31 +512,34 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 24), // Increased from 16
 
           // Content Section
           Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Expand/Collapse Control
+              // Expand/Collapse Control - MADE BIGGER
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16), // Increased from 12
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton.icon(
                       onPressed: () => setState(() => _isExpanded = !_isExpanded),
-                      icon: Icon(_isExpanded ? Icons.expand_less : Icons.expand_more),
-                      label: Text(_isExpanded ? 'Collapse All' : 'Expand All'),
+                      icon: Icon(_isExpanded ? Icons.expand_less : Icons.expand_more, size: 24), // Added size
+                      label: Text(
+                        _isExpanded ? 'Collapse All' : 'Expand All',
+                        style: const TextStyle(fontSize: 16), // Added font size
+                      ),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 20), // Increased from 16
 
-              // Specializations
+              // Specializations - MADE BIGGER
               ...sortedSpecializations.map((specialization) {
                 final doctorShifts = groupedShifts[specialization]!;
                 final totalShiftsInSpec = doctorShifts.values
@@ -542,49 +547,53 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                     .fold(0, (sum, count) => sum + count);
 
                 return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 10), // Increased margins
                   child: Card(
-                    elevation: 2,
+                    elevation: 4, // Increased from 2
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16), // Increased from default
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Specialization Header
+                        // Specialization Header - MADE BIGGER
                         Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(24), // Increased from 16
                           decoration: BoxDecoration(
                             color: Colors.blue[50],
                             borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(12),
-                              topRight: Radius.circular(12),
+                              topLeft: Radius.circular(16), // Increased from 12
+                              topRight: Radius.circular(16), // Increased from 12
                             ),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.medical_services, color: Colors.blue[700]),
-                              const SizedBox(width: 12),
+                              Icon(Icons.medical_services, color: Colors.blue[700], size: 28), // Increased size
+                              const SizedBox(width: 16), // Increased from 12
                               Expanded(
                                 child: Text(
                                   specialization,
                                   style: TextStyle(
-                                    fontSize: 18,
+                                    fontSize: 20, // Increased from 18
                                     fontWeight: FontWeight.bold,
                                     color: Colors.blue[700],
                                   ),
                                 ),
                               ),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Increased padding
                                 decoration: BoxDecoration(
                                   color: Colors.blue[100],
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(16), // Increased from 12
                                 ),
                                 child: Text(
                                   '$totalShiftsInSpec shifts',
                                   style: TextStyle(
                                     fontWeight: FontWeight.w600,
                                     color: Colors.blue[700],
+                                    fontSize: 14, // Added explicit font size
                                   ),
                                 ),
                               ),
@@ -592,146 +601,180 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                           ),
                         ),
 
-                        // Doctors Table
+                        // Doctors Table - MADE BIGGER
                         if (_isExpanded)
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              headingRowColor: MaterialStateProperty.all(Colors.grey[100]),
-                              columnSpacing: 20,
-                              columns: const [
-                                DataColumn(
-                                  label: Text(
-                                    'Doctor',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
+                          Padding(
+                            padding:  const EdgeInsets.all(16), // Added padding around the table
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: DataTable(
+                                headingRowColor: MaterialStateProperty.all(Colors.grey[100]),
+                                columnSpacing: 40, // Increased from 20
+                                dataRowHeight: 80, // Increased row height from default (56)
+                                headingRowHeight: 64, // Increased heading height from default (56)
+                                // BIGGER COLUMN HEADERS
+                                columns: const [
+                                  DataColumn(
+                                    label: Padding(
+                                      padding: EdgeInsets.all(8.0), // Added padding
+                                      child: Text(
+                                        'Doctor',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16, // Increased font size
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                DataColumn(
-                                  label: Text(
-                                    'Seniority',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                  DataColumn(
+                                    label: Padding(
+                                      padding: EdgeInsets.all(8.0), // Added padding
+                                      child: Text(
+                                        'Seniority',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16, // Increased font size
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                DataColumn(
-                                  label: Text(
-                                    'Shift Dates (Click to Edit/Delete)',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                  DataColumn(
+                                    label: Padding(
+                                      padding: EdgeInsets.all(8.0), // Added padding
+                                      child: Text(
+                                        'Shift Dates (Click to Edit/Delete)',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16, // Increased font size
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                // Removed Actions column since dates are now clickable
-                              ],
-                              rows: doctorShifts.entries.map((entry) {
-                                final doctor = entry.key;
-                                final doctorShiftsList = entry.value;
+                                ],
+                                rows: doctorShifts.entries.map((entry) {
+                                  final doctor = entry.key;
+                                  final doctorShiftsList = entry.value;
 
-                                return DataRow(
-                                  cells: [
-                                    DataCell(
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Text(
-                                            doctor.name,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          Text(
-                                            '${doctorShiftsList.length} shifts',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey[600],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: _getSeniorityColor(doctor.seniority ?? ''),
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Text(
-                                          doctor.seniority ?? 'Unknown',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    // New clickable dates implementation
-                                    DataCell(
-                                      Container(
-                                        width: 400,
-                                        height: 50, // Fixed height to prevent row expansion
-                                        child: SingleChildScrollView(
-                                          scrollDirection: Axis.horizontal, // Allow horizontal scrolling
-                                          child: Row( // Use Row instead of Wrap to keep everything in one line
-                                            children: doctorShiftsList.asMap().entries.map((entry) {
-                                              final index = entry.key;
-                                              final shift = entry.value;
-                                              return Container(
-                                                margin: EdgeInsets.only(
-                                                  right: index < doctorShiftsList.length - 1 ? 8 : 0, // Space between chips
+                                  return DataRow(
+                                    cells: [
+                                      // BIGGER DOCTOR CELL
+                                      DataCell(
+                                        Padding(
+                                          padding: const EdgeInsets.all(12.0), // Added padding
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Text(
+                                                doctor.name,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16, // Increased font size
                                                 ),
-                                                child: GestureDetector(
-                                                  onTap: () => _showShiftActionDialog(context, shift, doctor),
-                                                  child: Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.green[100],
-                                                      borderRadius: BorderRadius.circular(8),
-                                                      border: Border.all(color: Colors.green[300]!),
-                                                      boxShadow: [
-                                                        BoxShadow(
-                                                          color: Colors.green.withOpacity(0.1),
-                                                          blurRadius: 2,
-                                                          offset: const Offset(0, 1),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.event,
-                                                          size: 14,
-                                                          color: Colors.green[700],
-                                                        ),
-                                                        const SizedBox(width: 6),
-                                                        Text(
-                                                          shift.date,
-                                                          style: TextStyle(
-                                                            fontSize: 12,
-                                                            fontWeight: FontWeight.w500,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '${doctorShiftsList.length} shifts',
+                                                style: TextStyle(
+                                                  fontSize: 14, // Increased from 12
+                                                  color: Colors.grey[600],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      // BIGGER SENIORITY CELL
+                                      DataCell(
+                                        Padding(
+                                          padding: const EdgeInsets.all(12.0), // Added padding
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Increased padding
+                                            decoration: BoxDecoration(
+                                              color: _getSeniorityColor(doctor.seniority ?? ''),
+                                              borderRadius: BorderRadius.circular(16), // Increased from 12
+                                            ),
+                                            child: Text(
+                                              doctor.seniority ?? 'Unknown',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14, // Increased from 12
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      // BIGGER DATES CELL
+                                      DataCell(
+                                        Container(
+                                          width: 500, // Increased from 400
+                                          height: 70, // Increased from 50
+                                          padding: const EdgeInsets.all(8.0), // Added padding
+                                          child: SingleChildScrollView(
+                                            scrollDirection: Axis.horizontal,
+                                            child: Row(
+                                              children: doctorShiftsList.asMap().entries.map((entry) {
+                                                final index = entry.key;
+                                                final shift = entry.value;
+                                                return Container(
+                                                  margin: EdgeInsets.only(
+                                                    right: index < doctorShiftsList.length - 1 ? 12 : 0, // Increased spacing
+                                                  ),
+                                                  child: GestureDetector(
+                                                    onTap: () => _showShiftActionDialog(context, shift, doctor),
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Increased padding
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.green[100],
+                                                        borderRadius: BorderRadius.circular(12), // Increased from 8
+                                                        border: Border.all(color: Colors.green[300]!, width: 2), // Increased border width
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: Colors.green.withOpacity(0.2), // Increased opacity
+                                                            blurRadius: 4, // Increased from 2
+                                                            offset: const Offset(0, 2), // Increased from (0, 1)
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.event,
+                                                            size: 18, // Increased from 14
                                                             color: Colors.green[700],
                                                           ),
-                                                        ),
-                                                        const SizedBox(width: 4),
-                                                        Icon(
-                                                          Icons.touch_app,
-                                                          size: 12,
-                                                          color: Colors.green[600],
-                                                        ),
-                                                      ],
+                                                          const SizedBox(width: 8), // Increased from 6
+                                                          Text(
+                                                            shift.date,
+                                                            style: TextStyle(
+                                                              fontSize: 14, // Increased from 12
+                                                              fontWeight: FontWeight.w500,
+                                                              color: Colors.green[700],
+                                                            ),
+                                                          ),
+                                                          const SizedBox(width: 6), // Increased from 4
+                                                          Icon(
+                                                            Icons.touch_app,
+                                                            size: 16, // Increased from 12
+                                                            color: Colors.green[600],
+                                                          ),
+                                                        ],
+                                                      ),
                                                     ),
                                                   ),
-                                                ),
-                                              );
-                                            }).toList(),
+                                                );
+                                              }).toList(),
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                );
-                              }).toList(),
-                            )
+                                    ],
+                                  );
+                                }).toList(),
+                              ),
+                            ),
                           ),
                       ],
                     ),
@@ -739,24 +782,30 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                 );
               }).toList(),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 32), // Increased from 24
 
-              // Action Buttons
+              // Action Buttons - MADE BIGGER
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20), // Increased from 16
                 child: Row(
                   children: [
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 20), // Increased from 16
                     Expanded(
                       flex: 2,
                       child: ElevatedButton.icon(
                         onPressed: _completeReview,
-                        icon: const Icon(Icons.check_circle),
-                        label: const Text('Complete Review'),
+                        icon: const Icon(Icons.check_circle, size: 24), // Added icon size
+                        label: const Text(
+                          'Complete Review',
+                          style: TextStyle(fontSize: 16), // Added font size
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 20), // Increased from 16
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12), // Added border radius
+                          ),
                         ),
                       ),
                     ),
@@ -764,7 +813,7 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 20), // Increased from 16
             ],
           ),
         ],
@@ -772,25 +821,37 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
     );
   }
 
-// Add this new method to handle the shift action dialog:
+  // BIGGER DIALOG
   void _showShiftActionDialog(BuildContext context, SectionShift shift, Doctor doctor) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Manage Shift'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), // Added border radius
+        contentPadding: const EdgeInsets.all(24), // Increased padding
+        title: const Text(
+          'Manage Shift',
+          style: TextStyle(fontSize: 20), // Added font size
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Doctor: ${doctor.name}'),
-            const SizedBox(height: 8),
-            Text('Date: ${shift.date}'),
-            const SizedBox(height: 16),
+            Text(
+              'Doctor: ${doctor.name}',
+              style: const TextStyle(fontSize: 16), // Added font size
+            ),
+            const SizedBox(height: 12), // Increased from 8
+            Text(
+              'Date: ${shift.date}',
+              style: const TextStyle(fontSize: 16), // Added font size
+            ),
+            const SizedBox(height: 20), // Increased from 16
             Text(
               'What would you like to do?',
               style: TextStyle(
                 fontWeight: FontWeight.w500,
                 color: Colors.grey[700],
+                fontSize: 16, // Added font size
               ),
             ),
           ],
@@ -798,17 +859,24 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontSize: 16), // Added font size
+            ),
           ),
           OutlinedButton.icon(
             onPressed: () {
               Navigator.pop(context);
               _editShiftDate(shift, doctor);
             },
-            icon: const Icon(Icons.edit, size: 18),
-            label: const Text('Edit Date'),
+            icon: const Icon(Icons.edit, size: 20), // Increased from 18
+            label: const Text(
+              'Edit Date',
+              style: TextStyle(fontSize: 16), // Added font size
+            ),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.blue,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), // Added padding
             ),
           ),
           ElevatedButton.icon(
@@ -816,17 +884,22 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
               Navigator.pop(context);
               _deleteShift(shift, doctor);
             },
-            icon: const Icon(Icons.delete, size: 18),
-            label: const Text('Delete'),
+            icon: const Icon(Icons.delete, size: 20), // Increased from 18
+            label: const Text(
+              'Delete',
+              style: TextStyle(fontSize: 16), // Added font size
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), // Added padding
             ),
           ),
         ],
       ),
     );
   }
+
   Color _getSeniorityColor(String seniority) {
     switch (seniority.toLowerCase()) {
       case 'junior':

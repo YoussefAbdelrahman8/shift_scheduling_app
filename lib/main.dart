@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shift_scheduling_app/providers/CoreSessionProvider.dart';
+import 'package:shift_scheduling_app/providers/DoctorConstraintProvider.dart';
 import 'package:shift_scheduling_app/providers/DoctorProvider.dart';
 
 import 'package:shift_scheduling_app/providers/SchedulingSessionProvider.dart';
@@ -48,6 +49,13 @@ void main() async{
               ),
               update: (context, scheduleProvider, previousSectionProvider) =>
               previousSectionProvider ?? SectionShiftProvider(scheduleProvider),
+            ),
+            ChangeNotifierProxyProvider<ScheduleSessionProvider, DoctorConstraintProvider>(
+              create: (context) => DoctorConstraintProvider(
+                Provider.of<ScheduleSessionProvider>(context, listen: false),
+              ),
+              update: (context, scheduleProvider, previousDoctorConstraintProvider) =>
+              previousDoctorConstraintProvider ?? DoctorConstraintProvider(scheduleProvider),
             ),
 
           ],
