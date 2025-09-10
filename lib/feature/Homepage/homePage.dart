@@ -20,8 +20,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
+      resizeToAvoidBottomInset: false, // Prevents FAB from moving with keyboard
 
       appBar: AppBar(
         backgroundColor: Colors.blueAccent,
@@ -46,55 +46,100 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
 
-      // 👇 Square Floating Action Button
+      // Fixed FAB positioning
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.cyan,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15), // 👈 makes it square
+          borderRadius: BorderRadius.circular(15),
         ),
-        child: const Icon(Icons.add_shopping_cart, color: Colors.white,size: 30,),
+        child: const Icon(Icons.add_shopping_cart, color: Colors.white, size: 30),
         onPressed: () {
           Navigator.pushNamed(context, Routes.NewScheduleScreenRoute);
         },
       ),
 
-      // 👇 Custom Notched App Bar to match square FAB
+      // Simplified BottomAppBar with manual navigation
       bottomNavigationBar: BottomAppBar(
-        padding: const EdgeInsets.only(bottom: 5),
         color: Colors.green,
         elevation: 0,
         notchMargin: 8,
         shape: const AutomaticNotchedShape(
-          RoundedRectangleBorder(borderRadius:BorderRadius.all(Radius.circular(100)) ), // outer shape
+          RoundedRectangleBorder(borderRadius:BorderRadius.all(Radius.circular(20)) ), // outer shape
           RoundedRectangleBorder( // 👈 makes notch rectangular
             borderRadius: BorderRadius.all(Radius.circular(20)),
           ),
         ),
-        child: BottomNavigationBar(
-          iconSize: 30,
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          currentIndex: index,
-          selectedItemColor: Colors.white,
-          unselectedItemColor: Colors.white70,
-          onTap: (i) => setState(() => index = i),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home),
-              label: "Home",
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.add_reaction_rounded),
-              label: "Add Doctor",
-            ),
-          ],
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Home button
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => index = 0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.home,
+                        color: index == 0 ? Colors.white : Colors.white70,
+                        size: 30,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Home",
+                        style: TextStyle(
+                          color: index == 0 ? Colors.white : Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Space for FAB
+              const SizedBox(width: 80),
+
+              // Add Doctor button
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => index = 1),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.add_reaction_rounded,
+                        color: index == 1 ? Colors.white : Colors.white70,
+                        size: 30,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Add Doctor",
+                        style: TextStyle(
+                          color: index == 1 ? Colors.white : Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
 
-      // 👇 Body
-      body: tabs[index],
+      // Body with proper overflow handling
+      body: SafeArea(
+        child: IndexedStack(
+          index: index,
+          children: tabs,
+        ),
+      ),
     );
   }
-
 }

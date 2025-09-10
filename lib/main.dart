@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shift_scheduling_app/providers/ScheduleSession.dart';
+import 'package:shift_scheduling_app/providers/CoreSessionProvider.dart';
+import 'package:shift_scheduling_app/providers/DoctorProvider.dart';
+
 import 'package:shift_scheduling_app/providers/SchedulingSessionProvider.dart';
+import 'package:shift_scheduling_app/providers/SectionShiftProvider.dart';
 import 'core/routes_manager/route_generator.dart';
 import 'core/routes_manager/routes.dart';
 import 'db/DBHelper.dart';
@@ -15,8 +18,39 @@ void main() async{
   await db.database;
 
   runApp(
-  ChangeNotifierProvider(
-      create: (context) => SchedulingSessionProvider(),
+      MultiProvider(
+          providers: [
+            // First create CoreSessionProvider
+            ChangeNotifierProvider(
+              create: (_) => CoreSessionProvider(),
+            ),
+            // Then create DoctorProvider that depends on CoreSessionProvider
+            ChangeNotifierProxyProvider<CoreSessionProvider, DoctorProvider>(
+              create: (context) => DoctorProvider(
+                Provider.of<CoreSessionProvider>(context, listen: false),
+              ),
+              update: (context, sessionProvider, previousDoctorProvider) =>
+              previousDoctorProvider ?? DoctorProvider(sessionProvider),
+            ),
+            // Schedule session provider depends on core
+            ChangeNotifierProxyProvider<CoreSessionProvider, ScheduleSessionProvider>(
+              create: (context) => ScheduleSessionProvider(
+                Provider.of<CoreSessionProvider>(context, listen: false),
+              ),
+              update: (context, coreProvider, previousScheduleProvider) =>
+              previousScheduleProvider ?? ScheduleSessionProvider(coreProvider),
+            ),
+
+            // Section shift provider depends on schedule session
+            ChangeNotifierProxyProvider<ScheduleSessionProvider, SectionShiftProvider>(
+              create: (context) => SectionShiftProvider(
+                Provider.of<ScheduleSessionProvider>(context, listen: false),
+              ),
+              update: (context, scheduleProvider, previousSectionProvider) =>
+              previousSectionProvider ?? SectionShiftProvider(scheduleProvider),
+            ),
+
+          ],
       child: const MyApp()));
 
 }
@@ -29,7 +63,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       onGenerateRoute: RouteGenerator.getRoute,
-      initialRoute: Routes.HomePageRoute,
+      initialRoute: Routes.SignInRoute,
       title: 'Hospital Shift Scheduling',
       theme: ThemeData(
         primarySwatch: Colors.blue,

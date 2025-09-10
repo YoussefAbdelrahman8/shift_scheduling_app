@@ -1,748 +1,503 @@
 import 'package:flutter/foundation.dart';
-
-// Import your model classes and database helper
 import '../core/models/Doctor.dart';
-import '../core/models/DoctorConstraint.dart';
-import '../core/models/DoctorRequest.dart';
-import '../core/models/ReceptionDrop.dart';
-import '../core/models/ReceptionSchedule.dart';
-import '../core/models/ReceptionShift.dart';
-import '../core/models/SectionSchedule.dart';
-import '../core/models/SectionShift.dart';
-import '../core/models/User.dart';
-// import 'DatabaseHelper.dart'; // Your database helper
+import 'CoreSessionProvider.dart';
 
-enum SchedulingStep {
-  enteringSectionShifts,    // Step 1
-  reviewingSectionSchedule,  // Step 2
-  enteringDoctorConstraints, // Step 3
-  reviewingDoctorConstraints, // Step 4
-  generatingReceptionSchedule // Step 5
+
+enum ScheduleStep {
+  insertSectionShifts,
+  viewSectionShifts,
+  enterDoctorConstraints,
+  reviewDoctorConstraints,
+  generateReceptionSchedule,
 }
 
-class SchedulingSessionProvider extends ChangeNotifier {
-  // Session management
-  bool _isSessionActive = false;
+enum SessionStatus {
+  inactive,
+  active,
+  paused,
+  completed,
+  cancelled,
+}
+
+class ScheduleSessionProvider with ChangeNotifier {
+  final CoreSessionProvider _coreSessionProvider;
+
+  ScheduleSessionProvider(this._coreSessionProvider);
+
+  // ==================== SESSION STATE ====================
+  SessionStatus _sessionStatus = SessionStatus.inactive;
   String? _currentMonth;
-  SchedulingStep _currentStep = SchedulingStep.enteringSectionShifts;
-
-  // Temporary data storage during session
-  List<SectionShift> _tempSectionShifts = [];
-  List<DoctorConstraint> _tempDoctorConstraints = [];
-  List<ReceptionShift> _tempReceptionShifts = [];
-  List<Doctor> _availableDoctors = [];
-
-  List<String> _tempSpecializations = [];
-  String? _selectedSpecialization;
-  int? _selectedDoctorId;
-  List<Doctor> _doctorsForSelectedSpecialization = [];
-
-  // Session metadata
   DateTime? _sessionStartTime;
-  Map<String, dynamic> _sessionMetadata = {};
+  DateTime? _sessionEndTime;
 
-  // Getters
-  bool get isSessionActive => _isSessionActive;
+  // ==================== STEPPER STATE ====================
+  int _currentStepIndex = 0;
+  Map<ScheduleStep, bool> _stepCompletionStatus = {
+    ScheduleStep.insertSectionShifts: false,
+    ScheduleStep.viewSectionShifts: false,
+    ScheduleStep.enterDoctorConstraints: false,
+    ScheduleStep.reviewDoctorConstraints: false,
+    ScheduleStep.generateReceptionSchedule: false,
+  };
+
+  // ==================== WORKFLOW DATA ====================
+  Set<String> _processedSpecializations = {};
+
+  // Progress tracking
+  int _totalSectionShiftsAdded = 0;
+  int _totalConstraintsEntered = 0;
+  bool _scheduleGenerated = false;
+
+  // ==================== ERROR & LOADING STATE ====================
+  bool _isLoading = false;
+  String? _errorMessage;
+  String? _successMessage;
+
+  // ==================== GETTERS ====================
+
+  // Session state getters
+  SessionStatus get sessionStatus => _sessionStatus;
   String? get currentMonth => _currentMonth;
-  SchedulingStep get currentStep => _currentStep;
-  List<SectionShift> get sectionShifts => List.unmodifiable(_tempSectionShifts);
-  List<DoctorConstraint> get doctorConstraints => List.unmodifiable(_tempDoctorConstraints);
-  List<ReceptionShift> get receptionShifts => List.unmodifiable(_tempReceptionShifts);
-  List<Doctor> get availableDoctors => List.unmodifiable(_availableDoctors);
+  bool get isSessionActive => _sessionStatus == SessionStatus.active;
+  bool get isSessionCompleted => _sessionStatus == SessionStatus.completed;
   DateTime? get sessionStartTime => _sessionStartTime;
-  Map<String, dynamic> get sessionMetadata => Map.unmodifiable(_sessionMetadata);
-  // UI workflow getters
-  List<String> get specializations => List.unmodifiable(_tempSpecializations);
-  String? get selectedSpecialization => _selectedSpecialization;
-  int? get selectedDoctorId => _selectedDoctorId;
-  List<Doctor> get doctorsForSelectedSpecialization => List.unmodifiable(_doctorsForSelectedSpecialization);
+  DateTime? get sessionEndTime => _sessionEndTime;
+  Duration? get sessionDuration => _sessionStartTime != null && _sessionEndTime != null
+      ? _sessionEndTime!.difference(_sessionStartTime!)
+      : null;
+
+  // Stepper state getters
+  int get currentStepIndex => _currentStepIndex;
+  ScheduleStep get currentStep => ScheduleStep.values[_currentStepIndex];
+  Map<ScheduleStep, bool> get stepCompletionStatus => Map.unmodifiable(_stepCompletionStatus);
+  bool get canGoToNextStep => _currentStepIndex < ScheduleStep.values.length - 1;
+  bool get canGoToPreviousStep => _currentStepIndex > 0;
+  bool get isCurrentStepCompleted => _stepCompletionStatus[currentStep] ?? false;
+
+  // Progress getters
+  double get overallProgress => _stepCompletionStatus.values.where((completed) => completed).length / ScheduleStep.values.length;
+  int get completedStepsCount => _stepCompletionStatus.values.where((completed) => completed).length;
+  Set<String> get processedSpecializations => Set.unmodifiable(_processedSpecializations);
+
+  // Data getters from CoreSessionProvider
+  List<String> get availableSpecializations => _coreSessionProvider.specializations;
+  List<Doctor> get allDoctors => _coreSessionProvider.allDoctors;
+  Map<String, int> get specializationCounts => _coreSessionProvider.specializationCounts;
+  bool get isCoreDataLoaded => _coreSessionProvider.isSharedDataLoaded;
+  int get remainingSpecializations => availableSpecializations.length - _processedSpecializations.length;
+
+  // Statistics getters
+  int get totalSectionShiftsAdded => _totalSectionShiftsAdded;
+  int get totalConstraintsEntered => _totalConstraintsEntered;
+  bool get scheduleGenerated => _scheduleGenerated;
+
+  // UI state getters
+  bool get isLoading => _isLoading;
+  String? get errorMessage => _errorMessage;
+  String? get successMessage => _successMessage;
 
   // ==================== SESSION MANAGEMENT ====================
 
-  /// Start a new scheduling session for a specific month
-  void startSession(String month, List<Doctor> doctors) {
-    if (_isSessionActive) {
-      throw Exception('A session is already active. Please end the current session first.');
-    }
+  /// Start a new scheduling session
+  Future<bool> startSession(String month) async {
+    _setLoading(true);
+    _clearMessages();
 
-
-
-    _isSessionActive = true;
-    _currentMonth = month;
-    _currentStep = SchedulingStep.enteringSectionShifts;
-    _availableDoctors = List.from(doctors);
-    _sessionStartTime = DateTime.now();
-    _sessionMetadata['month'] = month;
-    _sessionMetadata['doctorCount'] = doctors.length;
-
-    _clearTempData();
-    notifyListeners();
-
-    print('Scheduling session started for month: $month');
-  }
-  /// Start session with specializations (for UI workflow)
-  void startSessionWithSpecializations(String month, List<String> specializations) {
-    if (_isSessionActive) {
-      throw Exception('A session is already active. Please end the current session first.');
-    }
-
-    _isSessionActive = true;
-    _currentMonth = month;
-    _currentStep = SchedulingStep.enteringSectionShifts;
-    _sessionStartTime = DateTime.now();
-    _sessionMetadata['month'] = month;
-    _sessionMetadata['specializations'] = specializations;
-
-    // Store specializations for UI workflow
-    _tempSpecializations = List.from(specializations);
-    _clearTempData();
-    notifyListeners();
-
-    print('Scheduling session started for month: $month with specializations');
-  }
-
-  
-
-  /// End the current session and clear all data
-  void endSession() {
-    if (!_isSessionActive) {
-      throw Exception('No active session to end.');
-    }
-
-    _isSessionActive = false;
-    _currentMonth = null;
-    _currentStep = SchedulingStep.enteringSectionShifts;
-    _sessionStartTime = null;
-    _sessionMetadata.clear();
-
-    _clearTempData();
-    notifyListeners();
-
-    print('Scheduling session ended.');
-  }
-
-  /// Clear session and start fresh (useful for canceling current process)
-  void cancelSession() {
-    if (_isSessionActive) {
-      endSession();
-    }
-  }
-
-  /// Move to next step in the process
-  void nextStep() {
-    if (!_isSessionActive) {
-      throw Exception('No active session.');
-    }
-
-    switch (_currentStep) {
-      case SchedulingStep.enteringSectionShifts:
-        _currentStep = SchedulingStep.reviewingSectionSchedule;
-        break;
-      case SchedulingStep.reviewingSectionSchedule:
-        _currentStep = SchedulingStep.enteringDoctorConstraints;
-        break;
-      case SchedulingStep.enteringDoctorConstraints:
-        _currentStep = SchedulingStep.reviewingDoctorConstraints;
-        break;
-      case SchedulingStep.reviewingDoctorConstraints:
-        _currentStep = SchedulingStep.generatingReceptionSchedule;
-        break;
-      case SchedulingStep.generatingReceptionSchedule:
-      // Stay at final step
-        break;
-    }
-    notifyListeners();
-  }
-
-  /// Move to previous step in the process
-  void previousStep() {
-    if (!_isSessionActive) {
-      throw Exception('No active session.');
-    }
-
-    switch (_currentStep) {
-      case SchedulingStep.enteringSectionShifts:
-      // Stay at first step
-        break;
-      case SchedulingStep.reviewingSectionSchedule:
-        _currentStep = SchedulingStep.enteringSectionShifts;
-        break;
-      case SchedulingStep.enteringDoctorConstraints:
-        _currentStep = SchedulingStep.reviewingSectionSchedule;
-        break;
-      case SchedulingStep.reviewingDoctorConstraints:
-        _currentStep = SchedulingStep.enteringDoctorConstraints;
-        break;
-      case SchedulingStep.generatingReceptionSchedule:
-        _currentStep = SchedulingStep.reviewingDoctorConstraints;
-        break;
-    }
-    notifyListeners();
-  }
-
-  /// Clear all temporary data
-  void _clearTempData() {
-    _tempSectionShifts.clear();
-    _tempDoctorConstraints.clear();
-    _tempReceptionShifts.clear();
-    _availableDoctors.clear();
-    _doctorsForSelectedSpecialization.clear();
-    _tempSpecializations.clear();
-    _selectedSpecialization = null;
-    _selectedDoctorId = null;
-  }
-
-  // ==================== UI WORKFLOW MANAGEMENT ====================
-
-  /// Set selected specialization and load doctors for it
-  Future<void> setSelectedSpecialization(String? specialization) async {
-    _selectedSpecialization = specialization;
-    _selectedDoctorId = null; // Reset doctor selection
-    _doctorsForSelectedSpecialization.clear();
-
-    if (specialization != null) {
-      // Here you would load doctors from database
-      // For now, this is a placeholder - replace with actual database call
-      // _doctorsForSelectedSpecialization = await DatabaseHelper.instance.getDoctorsBySpecialization(specialization);
-    }
-
-    notifyListeners();
-  }
-
-  /// Add doctors for selected specialization (called by UI)
-  void addDoctorsForSpecialization(List<Doctor> doctors) {
-    _doctorsForSelectedSpecialization = List.from(doctors);
-    notifyListeners();
-  }
-
-  /// Set selected doctor
-  void setSelectedDoctorId(int? doctorId) {
-    _selectedDoctorId = doctorId;
-    notifyListeners();
-  }
-
-  /// Add section shift with multiple dates for selected doctor
-  void addSectionShiftsForSelectedDoctor(List<String> dates) {
-    _validateSession();
-
-    if (_selectedDoctorId == null) {
-      throw Exception('No doctor selected');
-    }
-
-    for (String date in dates) {
-      final shift = SectionShift(
-        doctorId: _selectedDoctorId!,
-        date: date,
-      );
-      _tempSectionShifts.add(shift);
-    }
-
-    // Remove the doctor from available list (as per original UX)
-    _doctorsForSelectedSpecialization.removeWhere((d) => d.id == _selectedDoctorId);
-
-    // Reset selections
-    _selectedDoctorId = null;
-
-    // If no more doctors for this specialization, remove it
-    if (_doctorsForSelectedSpecialization.isEmpty && _selectedSpecialization != null) {
-      _tempSpecializations.remove(_selectedSpecialization);
-      _selectedSpecialization = null;
-    }
-
-    notifyListeners();
-  }
-
-  /// Check if all specializations are completed
-  bool get isAllSpecializationsCompleted => _tempSpecializations.isEmpty;
-
-  /// Get pending section shifts grouped by doctor
-  Map<String, List<Map<String, dynamic>>> getPendingSectionShifts() {
-    Map<String, List<Map<String, dynamic>>> grouped = {};
-
-    for (var shift in _tempSectionShifts) {
-      // Find doctor name from available doctors (you might need to store doctor names separately)
-      String doctorKey = 'Doctor ${shift.doctorId}'; // Placeholder - replace with actual doctor name
-
-      if (!grouped.containsKey(doctorKey)) {
-        grouped[doctorKey] = [];
+    try {
+      // Validate month format
+      if (!_isValidMonthFormat(month)) {
+        _setError('Invalid month format. Use YYYY-MM format.');
+        return false;
       }
 
-      grouped[doctorKey]!.add({
-        'doctorId': shift.doctorId,
-        'date': shift.date,
-        'specialization': _selectedSpecialization ?? 'Unknown', // You might want to store this in the shift
-      });
-    }
+      // Check if core session provider is authenticated and has data
+      if (!_coreSessionProvider.isAuthenticated) {
+        _setError('User not authenticated. Please sign in first.');
+        return false;
+      }
 
-    return grouped;
-  }
+      if (!_coreSessionProvider.isSharedDataLoaded) {
+        _setError('Core data not loaded. Please wait for initialization.');
+        return false;
+      }
 
-  // ==================== SECTION SHIFTS MANAGEMENT ====================
+      // Check if we have doctors available
+      if (availableSpecializations.isEmpty) {
+        _setError('No doctors found. Please add doctors before creating a schedule.');
+        return false;
+      }
 
-  /// Add a section shift
-  void addSectionShift(SectionShift shift) {
-    _validateSession();
-    _tempSectionShifts.add(shift);
-    notifyListeners();
-  }
+      // Initialize session
+      _currentMonth = month;
+      _sessionStartTime = DateTime.now();
+      _sessionEndTime = null;
+      _sessionStatus = SessionStatus.active;
+      _currentStepIndex = 0;
+      _resetProgress();
 
-  /// Add multiple section shifts
-  void addMultipleSectionShifts(List<SectionShift> shifts) {
-    _validateSession();
-    _tempSectionShifts.addAll(shifts);
-    notifyListeners();
-  }
+      _setSuccess('Schedule session started for $month');
+      return true;
 
-  /// Update a section shift by index
-  void updateSectionShift(int index, SectionShift updatedShift) {
-    _validateSession();
-    if (index >= 0 && index < _tempSectionShifts.length) {
-      _tempSectionShifts[index] = updatedShift;
-      notifyListeners();
-    }
-  }
-
-  /// Update section shift by finding matching one
-  void updateSectionShiftByMatch(SectionShift oldShift, SectionShift newShift) {
-    _validateSession();
-    final index = _tempSectionShifts.indexWhere((shift) =>
-    shift.doctorId == oldShift.doctorId &&
-        shift.date == oldShift.date);
-
-    if (index != -1) {
-      _tempSectionShifts[index] = newShift;
-      notifyListeners();
-    }
-  }
-
-  /// Remove a section shift by index
-  void removeSectionShift(int index) {
-    _validateSession();
-    if (index >= 0 && index < _tempSectionShifts.length) {
-      _tempSectionShifts.removeAt(index);
-      notifyListeners();
-    }
-  }
-
-  /// Remove section shift by doctor and date
-  void removeSectionShiftByDoctorDate(int doctorId, String date) {
-    _validateSession();
-    _tempSectionShifts.removeWhere((shift) =>
-    shift.doctorId == doctorId && shift.date == date);
-    notifyListeners();
-  }
-
-  /// Get section shifts for a specific doctor
-  List<SectionShift> getSectionShiftsByDoctor(int doctorId) {
-    return _tempSectionShifts.where((shift) => shift.doctorId == doctorId).toList();
-  }
-
-  /// Get section shifts for a specific date
-  List<SectionShift> getSectionShiftsByDate(String date) {
-    return _tempSectionShifts.where((shift) => shift.date == date).toList();
-  }
-
-  /// Get section schedule object
-  SectionSchedule getSectionSchedule() {
-    _validateSession();
-    return SectionSchedule(
-      month: _currentMonth!,
-      shifts: List.from(_tempSectionShifts),
-    );
-  }
-
-  /// Clear all section shifts
-  void clearSectionShifts() {
-    _validateSession();
-    _tempSectionShifts.clear();
-    notifyListeners();
-  }
-
-  // ==================== DOCTOR CONSTRAINTS MANAGEMENT ====================
-
-  /// Add a doctor constraint
-  void addDoctorConstraint(DoctorConstraint constraint) {
-    _validateSession();
-    // Remove existing constraint for this doctor if any
-    _tempDoctorConstraints.removeWhere((c) => c.doctorId == constraint.doctorId);
-    _tempDoctorConstraints.add(constraint);
-    notifyListeners();
-  }
-
-  /// Update a doctor constraint
-  void updateDoctorConstraint(DoctorConstraint updatedConstraint) {
-    _validateSession();
-    final index = _tempDoctorConstraints.indexWhere((c) => c.doctorId == updatedConstraint.doctorId);
-
-    if (index != -1) {
-      _tempDoctorConstraints[index] = updatedConstraint;
-    } else {
-      _tempDoctorConstraints.add(updatedConstraint);
-    }
-    notifyListeners();
-  }
-
-  /// Remove a doctor constraint
-  void removeDoctorConstraint(int doctorId) {
-    _validateSession();
-    _tempDoctorConstraints.removeWhere((c) => c.doctorId == doctorId);
-    notifyListeners();
-  }
-
-  /// Get constraint for a specific doctor
-  DoctorConstraint? getDoctorConstraint(int doctorId) {
-    try {
-      return _tempDoctorConstraints.firstWhere((c) => c.doctorId == doctorId);
     } catch (e) {
-      return null;
+      _setError('Failed to start session: $e');
+      return false;
+    } finally {
+      _setLoading(false);
     }
   }
 
-  /// Check if doctor has constraints
-  bool hasDoctorConstraints(int doctorId) {
-    return _tempDoctorConstraints.any((c) => c.doctorId == doctorId);
-  }
+  /// Complete the current session
+  Future<void> completeSession() async {
+    if (_sessionStatus != SessionStatus.active) return;
 
-  /// Clear all doctor constraints
-  void clearDoctorConstraints() {
-    _validateSession();
-    _tempDoctorConstraints.clear();
+    _sessionEndTime = DateTime.now();
+    _sessionStatus = SessionStatus.completed;
+    _setSuccess('Schedule generation completed successfully!');
     notifyListeners();
   }
 
-  // ==================== DOCTOR REQUESTS MANAGEMENT ====================
+  /// Cancel the current session
+  void cancelSession() {
+    if (_sessionStatus != SessionStatus.active) return;
 
-  /// Add doctor request to existing constraint
-  void addDoctorRequest(int doctorId, DoctorRequest request) {
-    _validateSession();
-    final constraintIndex = _tempDoctorConstraints.indexWhere((c) => c.doctorId == doctorId);
+    _sessionEndTime = DateTime.now();
+    _sessionStatus = SessionStatus.cancelled;
+    _resetProgress();
+    _clearMessages();
+    notifyListeners();
+  }
 
-    if (constraintIndex != -1) {
-      final constraint = _tempDoctorConstraints[constraintIndex];
-      final updatedRequests = List<DoctorRequest>.from(constraint.doctorRequests ?? []);
-      updatedRequests.add(request);
-
-      final updatedConstraint = DoctorConstraint(
-        id: constraint.id,
-        doctorId: constraint.doctorId,
-        totalShifts: constraint.totalShifts,
-        morningShifts: constraint.morningShifts,
-        eveningShifts: constraint.eveningShifts,
-        doctorRequests: updatedRequests,
-        seniority: constraint.seniority,
-        enforceWanted: constraint.enforceWanted,
-        enforceExceptions: constraint.enforceExceptions,
-        avoidWeekends: constraint.avoidWeekends,
-        enforceAvoidWeekends: constraint.enforceAvoidWeekends,
-        firstWeekDaysPreference: constraint.firstWeekDaysPreference,
-        lastWeekDaysPreference: constraint.lastWeekDaysPreference,
-        firstMonthDaysPreference: constraint.firstMonthDaysPreference,
-        lastMonthDaysPreference: constraint.lastMonthDaysPreference,
-        avoidConsecutiveDays: constraint.avoidConsecutiveDays,
-        priority: constraint.priority,
-      );
-
-      _tempDoctorConstraints[constraintIndex] = updatedConstraint;
+  /// Pause the current session
+  void pauseSession() {
+    if (_sessionStatus == SessionStatus.active) {
+      _sessionStatus = SessionStatus.paused;
       notifyListeners();
     }
   }
 
-  /// Remove doctor request from constraint
-  void removeDoctorRequest(int doctorId, DoctorRequest request) {
-    _validateSession();
-    final constraintIndex = _tempDoctorConstraints.indexWhere((c) => c.doctorId == doctorId);
-
-    if (constraintIndex != -1) {
-      final constraint = _tempDoctorConstraints[constraintIndex];
-      final updatedRequests = List<DoctorRequest>.from(constraint.doctorRequests ?? []);
-      updatedRequests.removeWhere((r) =>
-      r.date == request.date &&
-          r.shift == request.shift &&
-          r.type == request.type);
-
-      final updatedConstraint = DoctorConstraint(
-        id: constraint.id,
-        doctorId: constraint.doctorId,
-        totalShifts: constraint.totalShifts,
-        morningShifts: constraint.morningShifts,
-        eveningShifts: constraint.eveningShifts,
-        doctorRequests: updatedRequests,
-        seniority: constraint.seniority,
-        enforceWanted: constraint.enforceWanted,
-        enforceExceptions: constraint.enforceExceptions,
-        avoidWeekends: constraint.avoidWeekends,
-        enforceAvoidWeekends: constraint.enforceAvoidWeekends,
-        firstWeekDaysPreference: constraint.firstWeekDaysPreference,
-        lastWeekDaysPreference: constraint.lastWeekDaysPreference,
-        firstMonthDaysPreference: constraint.firstMonthDaysPreference,
-        lastMonthDaysPreference: constraint.lastMonthDaysPreference,
-        avoidConsecutiveDays: constraint.avoidConsecutiveDays,
-        priority: constraint.priority,
-      );
-
-      _tempDoctorConstraints[constraintIndex] = updatedConstraint;
+  /// Resume a paused session
+  void resumeSession() {
+    if (_sessionStatus == SessionStatus.paused) {
+      _sessionStatus = SessionStatus.active;
       notifyListeners();
     }
   }
 
-  // ==================== RECEPTION SHIFTS MANAGEMENT ====================
+  // ==================== STEP NAVIGATION ====================
 
-  /// Generate reception shifts (placeholder - implement your algorithm here)
-  void generateReceptionShifts() {
-    _validateSession();
+  /// Go to next step
+  bool goToNextStep() {
+    if (!canGoToNextStep) return false;
 
-    // This is where you would implement your scheduling algorithm
-    // using the section shifts and doctor constraints
+    _currentStepIndex++;
+    _clearMessages();
+    notifyListeners();
+    return true;
+  }
 
-    // For now, this is a placeholder
-    _tempReceptionShifts.clear();
+  /// Go to previous step
+  bool goToPreviousStep() {
+    if (!canGoToPreviousStep) return false;
 
-    // Example: Generate basic reception shifts based on section shifts
-    for (var sectionShift in _tempSectionShifts) {
-      // Add morning reception shift
-      _tempReceptionShifts.add(ReceptionShift(
-        doctorId: sectionShift.doctorId,
-        date: sectionShift.date,
-        shift: 'Day',
-      ));
+    _currentStepIndex--;
+    _clearMessages();
+    notifyListeners();
+    return true;
+  }
 
-      // Add evening reception shift (could be different doctor)
-      _tempReceptionShifts.add(ReceptionShift(
-        doctorId: sectionShift.doctorId,
-        date: sectionShift.date,
-        shift: 'Night',
-      ));
+  /// Jump to specific step (if allowed)
+  bool goToStep(int stepIndex) {
+    if (stepIndex < 0 || stepIndex >= ScheduleStep.values.length) return false;
+
+    // Check if we can jump to this step (all previous steps should be completed)
+    for (int i = 0; i < stepIndex; i++) {
+      if (!(_stepCompletionStatus[ScheduleStep.values[i]] ?? false)) {
+        _setError('Complete previous steps before accessing this step.');
+        return false;
+      }
+    }
+
+    _currentStepIndex = stepIndex;
+    _clearMessages();
+    notifyListeners();
+    return true;
+  }
+
+  /// Mark current step as completed
+  void markCurrentStepCompleted() {
+    _stepCompletionStatus[currentStep] = true;
+
+    // Auto-advance to next step if not the last step
+    if (canGoToNextStep) {
+      goToNextStep();
+    } else {
+      // All steps completed
+      completeSession();
     }
 
     notifyListeners();
-    print('Reception shifts generated: ${_tempReceptionShifts.length} shifts');
   }
 
-  /// Add a reception shift
-  void addReceptionShift(ReceptionShift shift) {
-    _validateSession();
-    _tempReceptionShifts.add(shift);
+  /// Mark specific step as completed
+  void markStepCompleted(ScheduleStep step, bool completed) {
+    _stepCompletionStatus[step] = completed;
     notifyListeners();
   }
 
-  /// Update a reception shift by index
-  void updateReceptionShift(int index, ReceptionShift updatedShift) {
-    _validateSession();
-    if (index >= 0 && index < _tempReceptionShifts.length) {
-      _tempReceptionShifts[index] = updatedShift;
-      notifyListeners();
+  // ==================== STEP-SPECIFIC PROGRESS TRACKING ====================
+
+  /// Update section shifts progress
+  void updateSectionShiftsProgress(int count) {
+    _totalSectionShiftsAdded = count;
+
+    // Mark step as completed if we have section shifts
+    if (count > 0) {
+      markStepCompleted(ScheduleStep.insertSectionShifts, true);
+      markStepCompleted(ScheduleStep.viewSectionShifts, true);
     }
-  }
 
-  /// Update reception shift by finding matching one
-  void updateReceptionShiftByMatch(ReceptionShift oldShift, ReceptionShift newShift) {
-    _validateSession();
-    final index = _tempReceptionShifts.indexWhere((shift) =>
-    shift.doctorId == oldShift.doctorId &&
-        shift.date == oldShift.date &&
-        shift.shift == oldShift.shift);
-
-    if (index != -1) {
-      _tempReceptionShifts[index] = newShift;
-      notifyListeners();
-    }
-  }
-
-  /// Remove a reception shift by index
-  void removeReceptionShift(int index) {
-    _validateSession();
-    if (index >= 0 && index < _tempReceptionShifts.length) {
-      _tempReceptionShifts.removeAt(index);
-      notifyListeners();
-    }
-  }
-
-  /// Remove reception shift by doctor, date and shift type
-  void removeReceptionShiftByMatch(int doctorId, String date, String shift) {
-    _validateSession();
-    _tempReceptionShifts.removeWhere((s) =>
-    s.doctorId == doctorId && s.date == date && s.shift == shift);
     notifyListeners();
   }
 
-  /// Get reception shifts for a specific doctor
-  List<ReceptionShift> getReceptionShiftsByDoctor(int doctorId) {
-    return _tempReceptionShifts.where((shift) => shift.doctorId == doctorId).toList();
-  }
+  /// Update constraints progress
+  void updateConstraintsProgress(int count) {
+    _totalConstraintsEntered = count;
 
-  /// Get reception shifts for a specific date
-  List<ReceptionShift> getReceptionShiftsByDate(String date) {
-    return _tempReceptionShifts.where((shift) => shift.date == date).toList();
-  }
+    // Mark steps as completed based on constraints
+    if (count > 0) {
+      markStepCompleted(ScheduleStep.enterDoctorConstraints, true);
+      markStepCompleted(ScheduleStep.reviewDoctorConstraints, true);
+    }
 
-  /// Get reception schedule object
-  ReceptionSchedule getReceptionSchedule() {
-    _validateSession();
-    return ReceptionSchedule(
-      month: _currentMonth!,
-      shifts: List.from(_tempReceptionShifts),
-    );
-  }
-
-  /// Clear all reception shifts
-  void clearReceptionShifts() {
-    _validateSession();
-    _tempReceptionShifts.clear();
     notifyListeners();
   }
 
-  // ==================== VALIDATION AND UTILITY ====================
+  /// Mark schedule as generated
+  void markScheduleGenerated() {
+    _scheduleGenerated = true;
+    markStepCompleted(ScheduleStep.generateReceptionSchedule, true);
+    notifyListeners();
+  }
 
-  /// Validate that a session is active
-  void _validateSession() {
-    if (!_isSessionActive) {
-      throw Exception('No active session. Please start a session first.');
+  /// Add processed specialization
+  void addProcessedSpecialization(String specialization) {
+    _processedSpecializations.add(specialization);
+    notifyListeners();
+  }
+
+  /// Remove processed specialization
+  void removeProcessedSpecialization(String specialization) {
+    _processedSpecializations.remove(specialization);
+    notifyListeners();
+  }
+
+  // ==================== DATA ACCESS METHODS ====================
+
+  /// Get doctors for a specific specialization (from CoreSessionProvider)
+  List<Doctor> getDoctorsForSpecialization(String specialization) {
+    return _coreSessionProvider.getDoctorsBySpecialization(specialization);
+  }
+
+  /// Get all doctors involved in the session (from CoreSessionProvider)
+  List<Doctor> getAllSessionDoctors() {
+    return _coreSessionProvider.allDoctors;
+  }
+
+  /// Get doctor by ID (from CoreSessionProvider)
+  Doctor? getDoctorById(int id) {
+    return _coreSessionProvider.getDoctorById(id);
+  }
+
+  /// Search doctors (from CoreSessionProvider)
+  List<Doctor> searchDoctors(String query) {
+    return _coreSessionProvider.searchDoctors(query);
+  }
+
+  /// Check if specialization is processed
+  bool isSpecializationProcessed(String specialization) {
+    return _processedSpecializations.contains(specialization);
+  }
+
+  /// Refresh core data if needed
+  Future<void> refreshCoreData() async {
+    await _coreSessionProvider.refreshSharedData();
+    notifyListeners();
+  }
+
+  // ==================== VALIDATION ====================
+
+  /// Validate session prerequisites
+  bool validateSessionPrerequisites() {
+    if (!_coreSessionProvider.isAuthenticated) {
+      _setError('User not authenticated.');
+      return false;
     }
+
+    if (!_coreSessionProvider.isSharedDataLoaded) {
+      _setError('Core data not loaded.');
+      return false;
+    }
+
+    if (availableSpecializations.isEmpty) {
+      _setError('No specializations available.');
+      return false;
+    }
+
+    if (allDoctors.isEmpty) {
+      _setError('No doctors available.');
+      return false;
+    }
+
+    return true;
   }
 
-  /// Check if current step allows section shift operations
-  bool canModifySectionShifts() {
-    return _isSessionActive &&
-        (_currentStep == SchedulingStep.enteringSectionShifts ||
-            _currentStep == SchedulingStep.reviewingSectionSchedule);
+  /// Validate month format (YYYY-MM)
+  bool _isValidMonthFormat(String month) {
+    final regex = RegExp(r'^\d{4}-\d{2}$');
+    return regex.hasMatch(month);
   }
 
-  /// Check if current step allows doctor constraint operations
-  bool canModifyDoctorConstraints() {
-    return _isSessionActive &&
-        (_currentStep == SchedulingStep.enteringDoctorConstraints ||
-            _currentStep == SchedulingStep.reviewingDoctorConstraints);
+  /// Reset all progress tracking
+  void _resetProgress() {
+    _stepCompletionStatus = {
+      ScheduleStep.insertSectionShifts: false,
+      ScheduleStep.viewSectionShifts: false,
+      ScheduleStep.enterDoctorConstraints: false,
+      ScheduleStep.reviewDoctorConstraints: false,
+      ScheduleStep.generateReceptionSchedule: false,
+    };
+    _processedSpecializations.clear();
+    _totalSectionShiftsAdded = 0;
+    _totalConstraintsEntered = 0;
+    _scheduleGenerated = false;
+    _currentStepIndex = 0;
   }
 
-  /// Check if current step allows reception shift operations
-  bool canModifyReceptionShifts() {
-    return _isSessionActive &&
-        _currentStep == SchedulingStep.generatingReceptionSchedule;
+  // ==================== STATE MANAGEMENT HELPERS ====================
+
+  void _setLoading(bool loading) {
+    _isLoading = loading;
+    notifyListeners();
   }
+
+  void _setError(String error) {
+    _errorMessage = error;
+    _successMessage = null;
+    print('Schedule Session Error: $error');
+    notifyListeners();
+  }
+
+  void _setSuccess(String message) {
+    _successMessage = message;
+    _errorMessage = null;
+    print('Schedule Session Success: $message');
+    notifyListeners();
+  }
+
+  void _clearMessages() {
+    _errorMessage = null;
+    _successMessage = null;
+  }
+
+  /// Clear error message
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// Clear success message
+  void clearSuccess() {
+    _successMessage = null;
+    notifyListeners();
+  }
+
+  /// Clear all messages
+  void clearAllMessages() {
+    _clearMessages();
+    notifyListeners();
+  }
+
+  // ==================== SESSION INFO & ANALYTICS ====================
 
   /// Get session summary
   Map<String, dynamic> getSessionSummary() {
     return {
-      'isActive': _isSessionActive,
       'month': _currentMonth,
-      'currentStep': _currentStep.toString(),
-      'sessionStartTime': _sessionStartTime?.toIso8601String(),
-      'sectionShiftsCount': _tempSectionShifts.length,
-      'doctorConstraintsCount': _tempDoctorConstraints.length,
-      'receptionShiftsCount': _tempReceptionShifts.length,
-      'availableDoctorsCount': _availableDoctors.length,
-      'metadata': _sessionMetadata,
+      'status': _sessionStatus.toString(),
+      'currentStep': currentStep.toString(),
+      'overallProgress': overallProgress,
+      'completedSteps': completedStepsCount,
+      'totalSteps': ScheduleStep.values.length,
+      'sectionShiftsAdded': _totalSectionShiftsAdded,
+      'constraintsEntered': _totalConstraintsEntered,
+      'specializations': availableSpecializations.length,
+      'processedSpecializations': _processedSpecializations.length,
+      'sessionDuration': sessionDuration?.toString(),
+      'scheduleGenerated': _scheduleGenerated,
+      'coreDataLoaded': isCoreDataLoaded,
+      'totalDoctors': allDoctors.length,
     };
   }
 
-  /// Validate if ready to proceed to next step
-  bool canProceedToNextStep() {
-    switch (_currentStep) {
-      case SchedulingStep.enteringSectionShifts:
-        return _tempSectionShifts.isNotEmpty;
-      case SchedulingStep.reviewingSectionSchedule:
-        return true; // Can always proceed from review
-      case SchedulingStep.enteringDoctorConstraints:
-        return _tempDoctorConstraints.isNotEmpty;
-      case SchedulingStep.reviewingDoctorConstraints:
-        return true; // Can always proceed from review
-      case SchedulingStep.generatingReceptionSchedule:
-        return _tempReceptionShifts.isNotEmpty;
-    }
+  /// Get step names for UI
+  List<String> getStepNames() {
+    return [
+      'Insert Section Shifts',
+      'View Section Shifts',
+      'Enter Doctor Constraints',
+      'Review Constraints',
+      'Generate Schedule',
+    ];
   }
 
-  /// Get validation errors for current step
-  List<String> getValidationErrors() {
-    List<String> errors = [];
-
-    switch (_currentStep) {
-      case SchedulingStep.enteringSectionShifts:
-        if (_tempSectionShifts.isEmpty) {
-          errors.add('At least one section shift is required');
-        }
-        break;
-      case SchedulingStep.enteringDoctorConstraints:
-        if (_tempDoctorConstraints.isEmpty) {
-          errors.add('At least one doctor constraint is required');
-        }
-        break;
-      case SchedulingStep.generatingReceptionSchedule:
-        if (_tempReceptionShifts.isEmpty) {
-          errors.add('Reception shifts must be generated');
-        }
-        break;
-      default:
-        break;
-    }
-
-    return errors;
+  /// Get step descriptions for UI
+  List<String> getStepDescriptions() {
+    return [
+      'Add section shifts for each specialization',
+      'Review and verify section shifts',
+      'Enter constraints for each doctor',
+      'Review all doctor constraints',
+      'Generate final reception schedule',
+    ];
   }
 
-  // ==================== DATABASE OPERATIONS ====================
-
-  /// Save all session data to database
-  /// This should be called only at the very end of the process
-  Future<bool> saveSessionToDatabase() async {
-    try {
-      _validateSession();
-
-      if (_tempSectionShifts.isEmpty && _tempReceptionShifts.isEmpty) {
-        throw Exception('No data to save');
-      }
-
-      // Here you would use your DatabaseHelper to save everything
-      // final dbHelper = DatabaseHelper();
-
-      // Save section shifts
-      // for (var shift in _tempSectionShifts) {
-      //   await dbHelper.insertSectionShift(shift);
-      // }
-
-      // Save doctor constraints
-      // for (var constraint in _tempDoctorConstraints) {
-      //   await dbHelper.insertDoctorConstraint(constraint);
-      //
-      //   // Save doctor requests
-      //   if (constraint.doctorRequests != null) {
-      //     for (var request in constraint.doctorRequests!) {
-      //       await dbHelper.insertDoctorRequest(request);
-      //     }
-      //   }
-      // }
-
-      // Save reception shifts
-      // for (var shift in _tempReceptionShifts) {
-      //   await dbHelper.insertReceptionShift(shift);
-      // }
-
-      print('Session data saved to database successfully');
-      return true;
-
-    } catch (e) {
-      print('Error saving session data: $e');
-      return false;
-    }
+  /// Get detailed workflow statistics
+  Map<String, dynamic> getWorkflowStatistics() {
+    return {
+      'sessionInfo': {
+        'month': _currentMonth,
+        'status': _sessionStatus.toString(),
+        'duration': sessionDuration?.toString(),
+      },
+      'stepProgress': {
+        'currentStep': _currentStepIndex,
+        'currentStepName': getStepNames()[_currentStepIndex],
+        'completedSteps': completedStepsCount,
+        'totalSteps': ScheduleStep.values.length,
+        'progressPercentage': (overallProgress * 100).round(),
+      },
+      'dataStatistics': {
+        'totalDoctors': allDoctors.length,
+        'totalSpecializations': availableSpecializations.length,
+        'processedSpecializations': _processedSpecializations.length,
+        'remainingSpecializations': remainingSpecializations,
+        'sectionShiftsAdded': _totalSectionShiftsAdded,
+        'constraintsEntered': _totalConstraintsEntered,
+        'scheduleGenerated': _scheduleGenerated,
+      },
+      'specializationBreakdown': specializationCounts,
+    };
   }
 
-  /// Load existing data from database for editing
-  Future<void> loadDataFromDatabase(String month) async {
-    try {
-      // final dbHelper = DatabaseHelper();
+  // ==================== DEBUG METHODS ====================
 
-      // Load section shifts for the month
-      // _tempSectionShifts = await dbHelper.getSectionScheduleForMonth(month);
+  /// Print session status for debugging
+  void printSessionStatus() {
+    print('Schedule Session Status: ${getSessionSummary()}');
+  }
 
-      // Load reception shifts for the month
-      // _tempReceptionShifts = await dbHelper.getReceptionScheduleForMonth(month);
-
-      // Load doctor constraints
-      // _tempDoctorConstraints = await dbHelper.getAllDoctorConstraints();
-
-      notifyListeners();
-      print('Data loaded from database for month: $month');
-
-    } catch (e) {
-      print('Error loading data from database: $e');
-    }
+  /// Print workflow statistics
+  void printWorkflowStatistics() {
+    print('Workflow Statistics: ${getWorkflowStatistics()}');
   }
 }

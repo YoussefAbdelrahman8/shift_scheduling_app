@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:crypto/crypto.dart';
 
 // Import your model classes
 import '../core/models/Doctor.dart';
@@ -133,6 +136,314 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX idx_section_shifts_date ON section_shifts (date)');
   }
 
+  // ==================== SECURE PASSWORD METHODS ====================
+
+  /// Generate a random salt for password hashing
+  String _generateSalt([int length = 32]) {
+    final random = Random.secure();
+    final bytes = List<int>.generate(length, (i) => random.nextInt(256));
+    return base64.encode(bytes);
+  }
+
+  /// Hash password with salt
+  String _hashPassword(String password, String salt) {
+    final bytes = utf8.encode(password + salt);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
+  /// Verify password against hash
+  bool _verifyPassword(String password, String salt, String hashedPassword) {
+    return _hashPassword(password, salt) == hashedPassword;
+  }
+
+  /// Simple email validation helper
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+  }
+
+  /// Check password strength
+  bool _isStrongPassword(String password) {
+    // At least 8 characters, 1 uppercase, 1 lowercase, 1 number, 1 special char
+    return RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$')
+        .hasMatch(password);
+  }
+
+  // ==================== AUTHENTICATION METHODS ====================
+
+  /// Sign up a new user with secure password hashing
+  Future<Map<String, dynamic>> signUp({
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      // Validate input
+      if (username.trim().isEmpty) {
+        return {'success': false, 'message': 'Username cannot be empty'};
+      }
+      if (email.trim().isEmpty || !_isValidEmail(email)) {
+        return {'success': false, 'message': 'Please enter a valid email'};
+      }
+      if (password.length < 8) {
+        return {'success': false, 'message': 'Password must be at least 8 characters'};
+      }
+
+      // Add password strength validation
+      if (!_isStrongPassword(password)) {
+        return {
+          'success': false,
+          'message': 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+        };
+      }
+
+      // Check if username already exists
+      final existingUserByUsername = await _getUserByUsername(username);
+      if (existingUserByUsername != null) {
+        return {'success': false, 'message': 'Username already exists'};
+      }
+
+      // Check if email already exists
+      final existingUserByEmail = await getUserByEmail(email);
+      if (existingUserByEmail != null) {
+        return {'success': false, 'message': 'Email already registered'};
+      }
+
+      // Generate salt and hash password
+      final salt = _generateSalt();
+      final hashedPassword = _hashPassword(password, salt);
+
+      // Create new user with hashed password
+      final user = User(
+        username: username.trim(),
+        email: email.trim().toLowerCase(),
+        password: '$salt:$hashedPassword', // Store salt and hash together
+        createdAt: DateTime.now().toIso8601String(),
+      );
+
+      final userId = await insertUser(user);
+
+      return {
+        'success': true,
+        'message': 'Account created successfully',
+        'userId': userId
+      };
+
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to create account: $e'};
+    }
+  }
+
+  /// Sign in an existing user with secure password verification
+  Future<Map<String, dynamic>> signIn({
+    required String emailOrUsername,
+    required String password,
+  }) async {
+    try {
+      // Validate input
+      if (emailOrUsername.trim().isEmpty) {
+        return {'success': false, 'message': 'Email or username cannot be empty'};
+      }
+      if (password.isEmpty) {
+        return {'success': false, 'message': 'Password cannot be empty'};
+      }
+
+      User? user;
+
+      // Try to find user by email first, then by username
+      if (_isValidEmail(emailOrUsername)) {
+        user = await getUserByEmail(emailOrUsername.trim().toLowerCase());
+      } else {
+        user = await _getUserByUsername(emailOrUsername.trim());
+      }
+
+      // Check if user exists
+      if (user == null) {
+        return {'success': false, 'message': 'User not found'};
+      }
+
+      // Handle legacy users with plain text passwords (migration)
+      if (!user.password.contains(':')) {
+        // This is a plain text password, verify directly and then update to hashed
+        if (user.password == password) {
+          // Convert to hashed password
+          final salt = _generateSalt();
+          final hashedPassword = _hashPassword(password, salt);
+
+          final updatedUser = User(
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            password: '$salt:$hashedPassword',
+            createdAt: user.createdAt,
+          );
+
+          await updateUser(updatedUser);
+
+          return {
+            'success': true,
+            'message': 'Sign in successful (password upgraded to secure format)',
+            'user': updatedUser
+          };
+        } else {
+          return {'success': false, 'message': 'Invalid password'};
+        }
+      }
+
+      // Extract salt and hash from stored password
+      final passwordParts = user.password.split(':');
+      if (passwordParts.length != 2) {
+        return {'success': false, 'message': 'Invalid password format'};
+      }
+
+      final salt = passwordParts[0];
+      final storedHash = passwordParts[1];
+
+      // Verify password
+      if (!_verifyPassword(password, salt, storedHash)) {
+        return {'success': false, 'message': 'Invalid password'};
+      }
+
+      return {
+        'success': true,
+        'message': 'Sign in successful',
+        'user': user
+      };
+
+    } catch (e) {
+      return {'success': false, 'message': 'Sign in failed: $e'};
+    }
+  }
+
+  /// Check if user exists by email or username
+  Future<bool> userExists(String emailOrUsername) async {
+    try {
+      if (_isValidEmail(emailOrUsername)) {
+        final user = await getUserByEmail(emailOrUsername.trim().toLowerCase());
+        return user != null;
+      } else {
+        final user = await _getUserByUsername(emailOrUsername.trim());
+        return user != null;
+      }
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Secure change password method
+  Future<Map<String, dynamic>> changePassword({
+    required int userId,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      // Validate new password
+      if (newPassword.length < 8) {
+        return {'success': false, 'message': 'New password must be at least 8 characters'};
+      }
+
+      if (!_isStrongPassword(newPassword)) {
+        return {
+          'success': false,
+          'message': 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+        };
+      }
+
+      // Get current user
+      final user = await getUserById(userId);
+      if (user == null) {
+        return {'success': false, 'message': 'User not found'};
+      }
+
+      // Handle legacy users with plain text passwords
+      if (!user.password.contains(':')) {
+        if (user.password != currentPassword) {
+          return {'success': false, 'message': 'Current password is incorrect'};
+        }
+      } else {
+        // Extract salt and hash from stored password
+        final passwordParts = user.password.split(':');
+        if (passwordParts.length != 2) {
+          return {'success': false, 'message': 'Invalid password format'};
+        }
+
+        final salt = passwordParts[0];
+        final storedHash = passwordParts[1];
+
+        // Verify current password
+        if (!_verifyPassword(currentPassword, salt, storedHash)) {
+          return {'success': false, 'message': 'Current password is incorrect'};
+        }
+      }
+
+      // Generate new salt and hash for new password
+      final newSalt = _generateSalt();
+      final newHashedPassword = _hashPassword(newPassword, newSalt);
+
+      // Update user with new password
+      final updatedUser = User(
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        password: '$newSalt:$newHashedPassword',
+        createdAt: user.createdAt,
+      );
+
+      await updateUser(updatedUser);
+
+      return {'success': true, 'message': 'Password changed successfully'};
+
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to change password: $e'};
+    }
+  }
+
+  /// Reset password (for forgot password functionality)
+  Future<Map<String, dynamic>> resetPassword({
+    required String email,
+    required String newPassword,
+  }) async {
+    try {
+      // Validate new password
+      if (newPassword.length < 8) {
+        return {'success': false, 'message': 'New password must be at least 8 characters'};
+      }
+
+      if (!_isStrongPassword(newPassword)) {
+        return {
+          'success': false,
+          'message': 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+        };
+      }
+
+      // Get user by email
+      final user = await getUserByEmail(email.trim().toLowerCase());
+      if (user == null) {
+        return {'success': false, 'message': 'No account found with this email'};
+      }
+
+      // Generate new salt and hash for new password
+      final salt = _generateSalt();
+      final hashedPassword = _hashPassword(newPassword, salt);
+
+      // Update password
+      final updatedUser = User(
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        password: '$salt:$hashedPassword',
+        createdAt: user.createdAt,
+      );
+
+      await updateUser(updatedUser);
+
+      return {'success': true, 'message': 'Password reset successfully'};
+
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to reset password: $e'};
+    }
+  }
+
   // ==================== USER CRUD OPERATIONS ====================
 
   Future<int> insertUser(User user) async {
@@ -172,6 +483,20 @@ class DatabaseHelper {
     return null;
   }
 
+  /// Get user by username (helper method)
+  Future<User?> _getUserByUsername(String username) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'users',
+      where: 'username = ?',
+      whereArgs: [username],
+    );
+    if (maps.isNotEmpty) {
+      return User.fromMap(maps.first);
+    }
+    return null;
+  }
+
   Future<int> updateUser(User user) async {
     final db = await database;
     return await db.update(
@@ -190,8 +515,6 @@ class DatabaseHelper {
       whereArgs: [id],
     );
   }
-
-  // Add this method to your DatabaseHelper class
 
   /// Get all unique specializations from doctors table
   Future<List<String>> getSpecializations() async {
