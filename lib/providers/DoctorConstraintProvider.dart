@@ -1,5 +1,3 @@
-
-
 import 'package:flutter/cupertino.dart';
 
 import '../core/models/Doctor.dart';
@@ -75,15 +73,25 @@ class DoctorConstraintProvider with ChangeNotifier {
   int? get currentDoctorId => _currentDoctorId;
   ConstraintEntryStage get currentStage => _currentStage;
 
+  // Session delegation
+  bool get isSessionActive => _sessionProvider.isSessionActive;
+  String? get currentMonth => _sessionProvider.currentMonth;
+  List<Doctor> get allDoctors => _sessionProvider.allDoctors;
+
   // Basic constraints
   int get totalShifts => _totalShifts;
   int get morningShifts => _morningShifts;
   int get eveningShifts => _eveningShifts;
   int get remainingShifts => _totalShifts - _morningShifts - _eveningShifts;
+  bool get canProceedFromBasicConstraints =>
+      _totalShifts > 0 && remainingShifts >= 0;
 
-  // Drop data
+  // Drop management
   List<Map<String, dynamic>> get pendingDrops => List.unmodifiable(_pendingDrops);
-  Map<int, int> get calculatedShiftTotals => Map.unmodifiable(_calculatedShiftTotals);
+  bool get hasValidDropConfiguration => _validateAllDrops();
+  bool get willDropAllShifts => _pendingDrops.isNotEmpty && _getTotalDropsForCurrentDoctor() >= _totalShifts;
+  int get finalShiftsForCurrentDoctor => _totalShifts - _getTotalDropsForCurrentDoctor();
+  bool get needsToCompleteConstraints => finalShiftsForCurrentDoctor > 0;
 
   // Preferences
   bool get seniority => _seniority;
@@ -102,26 +110,10 @@ class DoctorConstraintProvider with ChangeNotifier {
   List<DoctorRequest> get wantedDays => List.unmodifiable(_wantedDays);
   List<DoctorRequest> get exceptionDays => List.unmodifiable(_exceptionDays);
 
-  // Data
-  Map<int, DoctorConstraint> get doctorConstraints => Map.unmodifiable(_doctorConstraints);
-  List<ReceptionDrop> get allDrops => List.unmodifiable(_allDrops);
-
-  // Session state from ScheduleSessionProvider
-  String? get currentMonth => _sessionProvider.currentMonth;
-  bool get isSessionActive => _sessionProvider.isSessionActive;
-  List<Doctor> get allDoctors => _sessionProvider.getAllSessionDoctors();
-
-  // UI State
+  // UI state
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   String? get successMessage => _successMessage;
-
-  // Computed properties
-  bool get canProceedFromBasicConstraints => _totalShifts > 0 && (_morningShifts + _eveningShifts) <= _totalShifts;
-  bool get hasValidDropConfiguration => _pendingDrops.isNotEmpty ? _validateAllDrops() : true;
-  bool get willDropAllShifts => _pendingDrops.isNotEmpty && _getTotalDropsForCurrentDoctor() >= _totalShifts;
-  int get finalShiftsForCurrentDoctor => _totalShifts - _getTotalDropsForCurrentDoctor();
-  bool get needsToCompleteConstraints => finalShiftsForCurrentDoctor > 0;
 
   // ==================== INITIALIZATION ====================
 
@@ -449,6 +441,9 @@ class DoctorConstraintProvider with ChangeNotifier {
     _setLoading(true);
 
     try {
+      // Check if dropping all shifts BEFORE applying
+      final droppingAllShifts = willDropAllShifts;
+
       // Save drops to database
       for (final dropData in _pendingDrops) {
         final drop = ReceptionDrop(
@@ -475,16 +470,16 @@ class DoctorConstraintProvider with ChangeNotifier {
       // Recalculate final totals
       await _calculateFinalShiftCounts();
 
-      // Decide next stage
-      if (willDropAllShifts) {
-        // Skip to completed if dropping all shifts
+      // Decide next stage based on whether all shifts were dropped
+      if (droppingAllShifts) {
+        // Complete constraints immediately for doctors who dropped all shifts
         await _completeConstraintsForCurrentDoctor();
+        _setSuccess('All shifts dropped - constraints completed automatically');
       } else {
-        // Continue to preferences
+        // Continue to preferences for doctors with remaining shifts
         _currentStage = ConstraintEntryStage.preferences;
+        _setSuccess('Drops applied successfully');
       }
-
-      _setSuccess('Drops applied successfully');
 
     } catch (e) {
       _setError('Failed to apply drops: $e');
@@ -555,7 +550,7 @@ class DoctorConstraintProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Set priority
+  /// Set priority level
   void setPriority(int value) {
     _priority = value;
     notifyListeners();
@@ -568,7 +563,7 @@ class DoctorConstraintProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // ==================== WANTED/EXCEPTION DAYS MANAGEMENT ====================
+  // ==================== WANTED DAYS MANAGEMENT ====================
 
   /// Add wanted day
   void addWantedDay(String date, String shift) {
@@ -602,6 +597,8 @@ class DoctorConstraintProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // ==================== EXCEPTION DAYS MANAGEMENT ====================
+
   /// Add exception day
   void addExceptionDay(String date, String shift) {
     if (_currentDoctorId == null) return;
@@ -627,9 +624,9 @@ class DoctorConstraintProvider with ChangeNotifier {
     }
   }
 
-  // ==================== CONSTRAINT COMPLETION ====================
+  // ==================== COMPLETION ====================
 
-  /// Complete constraints for current doctor
+  /// Save constraints for current doctor
   Future<void> completeConstraintsForCurrentDoctor() async {
     if (_currentDoctorId == null) {
       _setError('No doctor selected');
@@ -639,14 +636,21 @@ class DoctorConstraintProvider with ChangeNotifier {
     _setLoading(true);
 
     try {
-      await _saveConstraintsForCurrentDoctor();
+      // Save constraint
+      await _saveConstraintForCurrentDoctor();
+
+      // Save requests
       await _saveRequestsForCurrentDoctor();
 
       _currentStage = ConstraintEntryStage.completed;
-      _setSuccess('Constraints saved successfully');
+      _setSuccess('Constraints saved successfully!');
 
-      // Check if all doctors are completed
       _checkStepCompletion();
+
+      // Auto-reset form after showing completion
+      Future.delayed(const Duration(seconds: 2), () {
+        resetCurrentForm();
+      });
 
     } catch (e) {
       _setError('Failed to save constraints: $e');
@@ -655,13 +659,13 @@ class DoctorConstraintProvider with ChangeNotifier {
     }
   }
 
-  /// Save constraints to database
-  Future<void> _saveConstraintsForCurrentDoctor() async {
+  /// Save constraint for current doctor
+  Future<void> _saveConstraintForCurrentDoctor() async {
     if (_currentDoctorId == null) return;
 
     final constraint = DoctorConstraint(
       doctorId: _currentDoctorId!,
-      totalShifts: finalShiftsForCurrentDoctor, // Use final calculated shifts
+      totalShifts: finalShiftsForCurrentDoctor,
       morningShifts: _morningShifts,
       eveningShifts: _eveningShifts,
       seniority: _seniority,
@@ -678,9 +682,9 @@ class DoctorConstraintProvider with ChangeNotifier {
     );
 
     // Check if constraint already exists
-    final existingConstraint = _doctorConstraints[_currentDoctorId!];
-    if (existingConstraint != null) {
-      // Update
+    if (_doctorConstraints.containsKey(_currentDoctorId!)) {
+      // Update existing
+      final existingConstraint = _doctorConstraints[_currentDoctorId!]!;
       final updatedConstraint = DoctorConstraint(
         id: existingConstraint.id,
         doctorId: _currentDoctorId!,
@@ -699,6 +703,7 @@ class DoctorConstraintProvider with ChangeNotifier {
         avoidConsecutiveDays: _avoidConsecutiveDays,
         priority: _priority,
       );
+
       await _dbHelper.updateDoctorConstraint(updatedConstraint);
       _doctorConstraints[_currentDoctorId!] = updatedConstraint;
     } else {
@@ -768,10 +773,13 @@ class DoctorConstraintProvider with ChangeNotifier {
       eveningShifts: 0,
     );
 
-    _currentStage = ConstraintEntryStage.completed;
     _setSuccess('Doctor dropped all shifts - constraints auto-completed');
-
     _checkStepCompletion();
+
+    // Auto-reset form to go back to doctor selection
+    Future.delayed(const Duration(milliseconds: 500), () {
+      resetCurrentForm();
+    });
   }
 
   /// Check if constraints step should be marked complete
@@ -836,11 +844,9 @@ class DoctorConstraintProvider with ChangeNotifier {
         _pendingDrops.clear();
         break;
       case ConstraintEntryStage.preferences:
-        if (_pendingDrops.isNotEmpty) {
-          _currentStage = ConstraintEntryStage.dropConfiguration;
-        } else {
-          _currentStage = ConstraintEntryStage.dropDecision;
-        }
+        _currentStage = _pendingDrops.isEmpty
+            ? ConstraintEntryStage.dropDecision
+            : ConstraintEntryStage.dropConfiguration;
         break;
       case ConstraintEntryStage.wantedDays:
         _currentStage = ConstraintEntryStage.preferences;
@@ -854,110 +860,76 @@ class DoctorConstraintProvider with ChangeNotifier {
       default:
         break;
     }
-
     _clearMessages();
     notifyListeners();
   }
 
-  // ==================== VALIDATION ====================
+  // ==================== STATISTICS ====================
 
-  /// Validate session state
+  /// Get constraint completion statistics
+  Map<String, dynamic> getConstraintStatistics() {
+    final doctorsNeedingConstraints = getDoctorsNeedingConstraints();
+    final doctorsWithConstraints = getDoctorsWithCompletedConstraints();
+    final totalDoctors = allDoctors.length;
+
+    final completionPercentage = totalDoctors > 0
+        ? ((doctorsWithConstraints.length / totalDoctors) * 100).round()
+        : 0;
+
+    return {
+      'doctorsWithConstraints': doctorsWithConstraints.length,
+      'doctorsNeedingConstraints': doctorsNeedingConstraints.length,
+      'totalDoctors': totalDoctors,
+      'completionPercentage': completionPercentage,
+    };
+  }
+
+  // ==================== UTILITY METHODS ====================
+
+  /// Validate that session is active
   bool _validateSession() {
     if (!isSessionActive) {
       _setError('No active session. Please start a session first.');
       return false;
     }
-
-    if (currentMonth == null) {
-      _setError('No month specified for current session.');
-      return false;
-    }
-
     return true;
   }
 
-  // ==================== STATISTICS ====================
-
-  /// Get constraint statistics
-  Map<String, dynamic> getConstraintStatistics() {
-    final totalDoctorsWithShifts = allDoctors.where((doctor) {
-      final originalShifts = _originalShiftCounts[doctor.id] ?? 0;
-      return originalShifts > 0;
-    }).length;
-
-    final doctorsWithConstraints = getDoctorsWithCompletedConstraints().length;
-    final doctorsNeedingConstraints = getDoctorsNeedingConstraints().length;
-    final totalDrops = _allDrops.length;
-
-    return {
-      'totalDoctorsWithShifts': totalDoctorsWithShifts,
-      'doctorsWithConstraints': doctorsWithConstraints,
-      'doctorsNeedingConstraints': doctorsNeedingConstraints,
-      'totalDrops': totalDrops,
-      'completionPercentage': totalDoctorsWithShifts > 0
-          ? (doctorsWithConstraints / totalDoctorsWithShifts * 100).round()
-          : 0,
-    };
-  }
-
-  // ==================== HELPER METHODS ====================
-
+  /// Set loading state
   void _setLoading(bool loading) {
     _isLoading = loading;
     notifyListeners();
   }
 
-  void _setError(String error) {
-    _errorMessage = error;
+  /// Set error message
+  void _setError(String message) {
+    _errorMessage = message;
     _successMessage = null;
-    print('DoctorConstraint Provider Error: $error');
     notifyListeners();
   }
 
+  /// Set success message
   void _setSuccess(String message) {
     _successMessage = message;
     _errorMessage = null;
-    print('DoctorConstraint Provider Success: $message');
     notifyListeners();
   }
 
+  /// Clear all messages
   void _clearMessages() {
     _errorMessage = null;
     _successMessage = null;
   }
 
+  /// Clear error message
   void clearError() {
     _errorMessage = null;
     notifyListeners();
   }
 
+  /// Clear success message
   void clearSuccess() {
     _successMessage = null;
     notifyListeners();
-  }
-
-  void clearAllMessages() {
-    _clearMessages();
-    notifyListeners();
-  }
-
-  // ==================== DEBUG METHODS ====================
-
-  Map<String, dynamic> getProviderInfo() {
-    return {
-      'currentDoctorId': _currentDoctorId,
-      'currentStage': _currentStage.toString(),
-      'totalShifts': _totalShifts,
-      'finalShiftsForCurrentDoctor': finalShiftsForCurrentDoctor,
-      'pendingDropsCount': _pendingDrops.length,
-      'doctorsWithConstraints': getDoctorsWithCompletedConstraints().length,
-      'doctorsNeedingConstraints': getDoctorsNeedingConstraints().length,
-      'isSessionActive': isSessionActive,
-      'currentMonth': currentMonth,
-    };
-  }
-
-  void printProviderStatus() {
-    print('DoctorConstraint Provider Status: ${getProviderInfo()}');
   }
 }

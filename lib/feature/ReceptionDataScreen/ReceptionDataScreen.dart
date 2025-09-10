@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:collection/collection.dart';
 import '../../core/models/Doctor.dart';
 import '../../providers/DoctorConstraintProvider.dart';
 
@@ -35,10 +36,35 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DoctorConstraintProvider>().initializeForSession();
     });
+
+    // Add listener to handle automatic navigation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DoctorConstraintProvider>().addListener(_handleProviderChanges);
+    });
+  }
+
+  void _handleProviderChanges() {
+    final provider = context.read<DoctorConstraintProvider>();
+
+    // If we just completed a doctor and they have a success message about auto-completion
+    if (provider.currentStage == ConstraintEntryStage.selectDoctor &&
+        provider.successMessage?.contains('auto-completed') == true) {
+      // Show a snackbar to inform user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Doctor completed - all shifts dropped!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override
   void dispose() {
+    context.read<DoctorConstraintProvider>().removeListener(_handleProviderChanges);
     _totalShiftsController.dispose();
     _morningShiftsController.dispose();
     _eveningShiftsController.dispose();
@@ -1193,6 +1219,15 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
   Widget _buildCompleted(DoctorConstraintProvider provider) {
     final doctor = provider.allDoctors.firstWhere((d) => d.id == provider.currentDoctorId);
 
+    // Auto-navigate back to doctor selection after a delay
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          provider.resetCurrentForm();
+        }
+      });
+    });
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1214,6 +1249,11 @@ class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
                 Text(
                   'Final reception shifts: ${provider.finalShiftsForCurrentDoctor}',
                   style: const TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Returning to doctor selection...',
+                  style: TextStyle(color: Colors.grey, fontSize: 14),
                 ),
               ],
             ),

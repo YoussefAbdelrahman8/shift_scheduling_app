@@ -64,12 +64,12 @@ class DoctorConstraint {
       lastWeekDaysPreference: map['lastWeekDaysPreference'] == 1,
       firstMonthDaysPreference: map['firstMonthDaysPreference'] == 1,
       lastMonthDaysPreference: map['lastMonthDaysPreference'] == 1,
-      avoidConsecutiveDays: map['avoidConsecutiveDays'] == 1, // NEW
+      avoidConsecutiveDays: map['avoidConsecutiveDays'] == 1,
       priority: map['priority'] ?? 0,
     );
   }
 
-  /// toMap works like toJson
+  /// toMap works like toJson - includes doctorRequests for full serialization
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -87,7 +87,29 @@ class DoctorConstraint {
       'lastWeekDaysPreference': lastWeekDaysPreference ? 1 : 0,
       'firstMonthDaysPreference': firstMonthDaysPreference ? 1 : 0,
       'lastMonthDaysPreference': lastMonthDaysPreference ? 1 : 0,
-      'avoidConsecutiveDays': avoidConsecutiveDays ? 1 : 0, // NEW
+      'avoidConsecutiveDays': avoidConsecutiveDays ? 1 : 0,
+      'priority': priority,
+    };
+  }
+
+  /// Create a map for database operations (excludes doctorRequests which are stored separately)
+  Map<String, dynamic> toDatabaseMap() {
+    return {
+      'id': id,
+      'doctor_id': doctorId,
+      'totalShifts': totalShifts,
+      'morningShifts': morningShifts,
+      'eveningShifts': eveningShifts,
+      'seniority': seniority ? 1 : 0,
+      'enforceWanted': enforceWanted ? 1 : 0,
+      'enforceExceptions': enforceExceptions ? 1 : 0,
+      'avoidWeekends': avoidWeekends ? 1 : 0,
+      'enforceAvoidWeekends': enforceAvoidWeekends ? 1 : 0,
+      'firstWeekDaysPreference': firstWeekDaysPreference ? 1 : 0,
+      'lastWeekDaysPreference': lastWeekDaysPreference ? 1 : 0,
+      'firstMonthDaysPreference': firstMonthDaysPreference ? 1 : 0,
+      'lastMonthDaysPreference': lastMonthDaysPreference ? 1 : 0,
+      'avoidConsecutiveDays': avoidConsecutiveDays ? 1 : 0,
       'priority': priority,
     };
   }
