@@ -1,639 +1,894 @@
+// Fixed SectionScheduleListScreen.dart DataTable implementation
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../providers/ScheduleSessionProvider.dart';
-import '../../providers/SectionShiftProvider.dart';
 
-import '../../core/models/SectionShift.dart';
 import '../../core/models/Doctor.dart';
+import '../../core/models/SectionShift.dart';
+import '../../providers/SectionShiftProvider.dart';
 
 class PendingSchedulesTable extends StatefulWidget {
   final VoidCallback? onReviewComplete;
 
-  const PendingSchedulesTable({Key? key, this.onReviewComplete}) : super(key: key);
+  const PendingSchedulesTable({
+    Key? key,
+    this.onReviewComplete,
+  }) : super(key: key);
 
   @override
   State<PendingSchedulesTable> createState() => _PendingSchedulesTableState();
 }
 
 class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
-  bool _isExpanded = true;
+  bool _isExpanded = false;
+  final Map<String, bool> _specializationExpansion = {};
 
   @override
   void initState() {
     super.initState();
-    // Initialize the provider when entering this step
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = context.read<SectionShiftProvider>();
-      provider.initializeForSession();
+      _initializeData();
     });
   }
 
-  Future<void> _editShiftDate(BuildContext context, SectionShift shift) async {
-    if (shift.id == null) return;
+  Future<void> _initializeData() async {
+    if (!mounted) return;
 
-    final provider = context.read<SectionShiftProvider>();
-    final sessionProvider = context.read<ScheduleSessionProvider>();
+    try {
+      final provider = Provider.of<SectionShiftProvider>(context, listen: false);
+      provider.initializeForSession();
 
-    // Get current month for date constraints
-    final currentMonth = sessionProvider.currentMonth;
-    if (currentMonth == null) return;
-
-    final currentDate = DateTime.tryParse(shift.date) ?? DateTime.now();
-    final monthParts = currentMonth.split('-');
-    final year = int.parse(monthParts[0]);
-    final month = int.parse(monthParts[1]);
-
-    DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: currentDate,
-      firstDate: DateTime(year, month, 1),
-      lastDate: DateTime(year, month + 1, 0), // Last day of month
-      helpText: 'Select new date for shift',
-      confirmText: 'UPDATE',
-      cancelText: 'CANCEL',
-    );
-
-    if (picked != null) {
-      final newDate = picked.toIso8601String().split('T').first;
-
-      try {
-        // You'll need to implement this method in SectionShiftProvider
-        await provider.updateSectionShiftDate(shift.id!, newDate);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Shift date updated successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to update shift: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+      // Mark step as completed if we have sufficient data
+      if (provider.hasCompletedSectionShifts && widget.onReviewComplete != null) {
+        widget.onReviewComplete!();
       }
+    } catch (e) {
+      print('Error initializing PendingSchedulesTable: $e');
     }
   }
 
-  Future<void> _deleteShift(BuildContext context, SectionShift shift) async {
-    if (shift.id == null) return;
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SectionShiftProvider>(
+      builder: (context, provider, _) {
+        // Safe state checking
+        if (provider.isLoading) {
+          return const Center(
+            child: CircularProgressIndicator(),
+          );
+        }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Shift'),
-        content: Text('Are you sure you want to delete the shift on ${shift.date}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+        if (provider.errorMessage != null) {
+          return _buildErrorState(provider.errorMessage!);
+        }
+
+        if (!provider.isSessionActive) {
+          return _buildEmptyState(
+            icon: Icons.schedule,
+            title: 'No Active Session',
+            subtitle: 'Please start a schedule session first',
+          );
+        }
+
+        final shifts = provider.currentSessionSectionShifts;
+        final doctors = provider.allDoctors;
+
+        if (shifts.isEmpty) {
+          return _buildEmptyState(
+            icon: Icons.event_busy,
+            title: 'No Section Shifts Added Yet',
+            subtitle: 'Return to the previous step to add section shifts',
+          );
+        }
+
+        if (doctors.isEmpty) {
+          return _buildEmptyState(
+            icon: Icons.people_outline,
+            title: 'No Doctors Data Available',
+            subtitle: 'Please check your doctor database',
+          );
+        }
+
+        return _buildScheduleTable(provider, shifts, doctors);
+      },
+    );
+  }
+
+  Widget _buildErrorState(String errorMessage) {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, size: 64, color: Colors.red[400]),
+          const SizedBox(height: 16),
+          Text(
+            'Error Loading Schedule',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
+          const SizedBox(height: 8),
+          Text(
+            errorMessage,
+            style: TextStyle(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () async {
+              await _initializeData();
+            },
+            child: const Text('Retry'),
           ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      try {
-        final provider = context.read<SectionShiftProvider>();
-        await provider.deleteSectionShift(shift.id!);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Shift deleted successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to delete shift: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
   }
 
-  String _getDoctorName(int doctorId, List<Doctor> doctors) {
-    try {
-      final doctor = doctors.firstWhere((d) => d.id == doctorId);
-      return doctor.name;
-    } catch (e) {
-      return 'Unknown Doctor ($doctorId)';
-    }
+  Widget _buildEmptyState({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: TextStyle(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 
-  String _getDoctorSpecialization(int doctorId, List<Doctor> doctors) {
+  Widget _buildScheduleTable(SectionShiftProvider provider, List<SectionShift> shifts, List<Doctor> doctors) {
+    final groupedShifts = _groupShiftsBySpecializationAndDoctor(shifts, doctors);
+    final sortedSpecializations = groupedShifts.keys.toList()..sort();
+
+    if (groupedShifts.isEmpty) {
+      return const Center(
+        child: Text('Unable to group shifts by specialization'),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header Section
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.blue[600]!, Colors.blue[400]!],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  'Section Shifts Review',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _formatMonthYear(provider.currentMonth ?? ''),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildStatCard('Total Shifts', shifts.length.toString(), Icons.event),
+                    _buildStatCard('Doctors', _getUniqueDoctorCount(shifts).toString(), Icons.people),
+                    _buildStatCard('Specializations', sortedSpecializations.length.toString(), Icons.medical_services),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Specializations List
+          ...sortedSpecializations.map((specialization) {
+            final specializationShifts = groupedShifts[specialization]!;
+            final isExpanded = _specializationExpansion[specialization] ?? false;
+
+            return _buildSpecializationSection(
+              specialization,
+              specializationShifts,
+              isExpanded,
+              provider.allDoctors,
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 20),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecializationSection(
+      String specialization,
+      List<SectionShift> shifts,
+      bool isExpanded,
+      List<Doctor> allDoctors,
+      ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Specialization Header
+          InkWell(
+            onTap: () {
+              setState(() {
+                _specializationExpansion[specialization] = !isExpanded;
+              });
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.medical_services,
+                      color: Colors.blue[700],
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          specialization,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                            fontSize: 16,
+                          ),
+                        ),
+                        Text(
+                          '${shifts.length} shifts assigned',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    isExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: Colors.blue[700],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Expanded Content
+          if (isExpanded) ...[
+            const Divider(height: 1),
+            _buildSpecializationTable(shifts, allDoctors),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecializationTable(List<SectionShift> shifts, List<Doctor> allDoctors) {
+    // Group shifts by doctor
+    final Map<int, List<SectionShift>> shiftsByDoctor = {};
+    for (var shift in shifts) {
+      shiftsByDoctor.putIfAbsent(shift.doctorId, () => []).add(shift);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: MediaQuery.of(context).size.width - 32,
+          ),
+          child: DataTable(
+            headingRowColor: MaterialStateProperty.all(Colors.grey[100]),
+            columnSpacing: 20,
+            dataRowHeight: 60,
+            headingRowHeight: 50,
+            columns: const [
+              DataColumn(
+                label: Text('Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              DataColumn(
+                label: Text('Seniority', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              DataColumn(
+                label: Text('Assigned Dates', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              DataColumn(
+                label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+            rows: shiftsByDoctor.entries.map((entry) {
+              final doctorId = entry.key;
+              final doctorShifts = entry.value;
+              final doctor = allDoctors.firstWhere(
+                    (d) => d.id == doctorId,
+                orElse: () => Doctor(
+                    id: doctorId,
+                    name: 'Unknown Doctor',
+                    specialization: '',
+                    seniority: 'Unknown'
+                ),
+              );
+
+              return DataRow(
+                cells: [
+                  // Doctor Info Cell - FIXED STRUCTURE
+                  DataCell(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          doctor.name,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        Text(
+                          'ID: ${doctor.id}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Seniority Cell - FIXED STRUCTURE
+                  DataCell(
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _getSeniorityColor(doctor.seniority),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        doctor.seniority ?? 'Unknown',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Dates Cell - FIXED STRUCTURE
+                  DataCell(
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: doctorShifts.map((shift) {
+                        final dayOfMonth = DateTime.parse(shift.date).day;
+                        return Chip(
+                          label: Text(
+                            dayOfMonth.toString(),
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          backgroundColor: Colors.blue[100],
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  // Actions Cell - FIXED STRUCTURE
+                  DataCell(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                          tooltip: 'Edit Doctor Shifts',
+                          onPressed: () => _editDoctorShifts(context, doctor, doctorShifts),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                          tooltip: 'Delete All Shifts',
+                          onPressed: () => _deleteAllShiftsForDoctor(context, doctorId, doctorShifts),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Helper Methods
+  Map<String, List<SectionShift>> _groupShiftsBySpecializationAndDoctor(
+      List<SectionShift> shifts,
+      List<Doctor> doctors
+      ) {
+    final Map<String, List<SectionShift>> grouped = {};
+
+    for (var shift in shifts) {
+      final doctor = doctors.firstWhere(
+            (d) => d.id == shift.doctorId,
+        orElse: () => Doctor(id: shift.doctorId, name: '', specialization: 'Unknown', seniority: ''),
+      );
+
+      final specialization = doctor.specialization?.isNotEmpty == true
+          ? doctor.specialization!
+          : 'Unknown Specialization';
+
+      grouped.putIfAbsent(specialization, () => []).add(shift);
+    }
+
+    return grouped;
+  }
+
+  int _getUniqueDoctorCount(List<SectionShift> shifts) {
+    return shifts.map((s) => s.doctorId).toSet().length;
+  }
+
+  String _formatMonthYear(String monthString) {
     try {
-      final doctor = doctors.firstWhere((d) => d.id == doctorId);
-      return doctor.specialization ?? 'Unknown';
+      if (monthString.isEmpty) return 'No Month Selected';
+
+      final parts = monthString.split('-');
+      if (parts.length != 2) return monthString;
+
+      final year = int.parse(parts[0]);
+      final month = int.parse(parts[1]);
+
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+
+      return '${monthNames[month - 1]} $year';
     } catch (e) {
-      return 'Unknown';
+      return monthString;
     }
   }
 
   Color _getSeniorityColor(String? seniority) {
     switch (seniority?.toLowerCase()) {
-      case 'junior':
-        return Colors.blue.shade100;
-      case 'mid-level':
-        return Colors.orange.shade100;
       case 'senior':
-        return Colors.green.shade100;
-      case 'consultant':
-        return Colors.purple.shade100;
+        return Colors.green;
+      case 'middle':
+        return Colors.orange;
+      case 'junior':
+        return Colors.blue;
       default:
-        return Colors.grey.shade100;
+        return Colors.grey;
     }
   }
+// Replace your _editDoctorShifts method with this fixed version
 
-  Map<String, List<SectionShift>> _groupShiftsBySpecialization(
-      List<SectionShift> shifts, List<Doctor> doctors) {
-    final grouped = <String, List<SectionShift>>{};
+  void _editDoctorShifts(BuildContext context, Doctor doctor, List<SectionShift> shifts) {
+    // Declare state variables outside the builder
+    SectionShift? selectedShift;
+    DateTime? selectedNewDate;
+    bool isLoading = false;
+    String? errorMessage;
+    String? successMessage;
 
-    for (final shift in shifts) {
-      final specialization = _getDoctorSpecialization(shift.doctorId, doctors);
-      if (!grouped.containsKey(specialization)) {
-        grouped[specialization] = [];
-      }
-      grouped[specialization]!.add(shift);
-    }
-
-    // Sort shifts within each specialization by date
-    grouped.forEach((key, value) {
-      value.sort((a, b) => a.date.compareTo(b.date));
-    });
-
-    return grouped;
-  }
-
-  Map<int, List<String>> _consolidateDoctorShifts(List<SectionShift> shifts) {
-    final consolidated = <int, List<String>>{};
-
-    for (final shift in shifts) {
-      if (!consolidated.containsKey(shift.doctorId)) {
-        consolidated[shift.doctorId] = [];
-      }
-      consolidated[shift.doctorId]!.add(shift.date);
-    }
-
-    // Sort dates for each doctor
-    consolidated.forEach((key, value) {
-      value.sort();
-    });
-
-    return consolidated;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer2<SectionShiftProvider, ScheduleSessionProvider>(
-      builder: (context, sectionProvider, sessionProvider, child) {
-        final shifts = sectionProvider.currentSessionSectionShifts;
-        final allDoctors = sessionProvider.getAllSessionDoctors();
-        final currentMonth = sessionProvider.currentMonth;
-
-        // Handle loading state
-        if (sectionProvider.isLoading) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Loading section shifts...'),
-              ],
-            ),
-          );
-        }
-
-        // Handle empty state
-        if (shifts.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.schedule, size: 64, color: Colors.grey.shade400),
-                const SizedBox(height: 16),
-                Text(
-                  "No Section Shifts Created Yet",
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Go back to the previous step to add section shifts",
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.grey.shade500,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    sessionProvider.goToPreviousStep();
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text("Add Section Shifts"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        // Group shifts by specialization
-        final groupedShifts = _groupShiftsBySpecialization(shifts, allDoctors);
-        final uniqueDoctors = shifts.map((s) => s.doctorId).toSet().length;
-
-        return Column(
-          children: [
-            // Header with statistics
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.blue.shade700, Colors.blue.shade500],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Section Shifts Review',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        currentMonth ?? '',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          '${shifts.length} Total Shifts',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          '$uniqueDoctors Doctors',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Error message display
-            if (sectionProvider.errorMessage != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                color: Colors.red.shade50,
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        sectionProvider.errorMessage!,
-                        style: TextStyle(color: Colors.red.shade700),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: sectionProvider.clearError,
-                      icon: Icon(Icons.close, color: Colors.red.shade700),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Success message display
-            if (sectionProvider.successMessage != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                color: Colors.green.shade50,
-                child: Row(
-                  children: [
-                    Icon(Icons.check_circle_outline, color: Colors.green.shade700),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        sectionProvider.successMessage!,
-                        style: TextStyle(color: Colors.green.shade700),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: sectionProvider.clearSuccess,
-                      icon: Icon(Icons.close, color: Colors.green.shade700),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Main content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('Edit Shifts for ${doctor.name}'),
+              content: SizedBox(
+                width: double.maxFinite,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Expand/Collapse all button
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '${groupedShifts.length} Specializations',
-                          style: Theme.of(context).textTheme.titleMedium,
+                    // Error/Success messages
+                    if (errorMessage != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.red[50],
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.red[200]!),
                         ),
-                        TextButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _isExpanded = !_isExpanded;
-                            });
-                          },
-                          icon: Icon(_isExpanded ? Icons.expand_less : Icons.expand_more),
-                          label: Text(_isExpanded ? 'Collapse All' : 'Expand All'),
+                        child: Text(
+                          errorMessage!,
+                          style: TextStyle(color: Colors.red[700], fontSize: 12),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
 
-                    const SizedBox(height: 16),
+                    if (successMessage != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.green[50],
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.green[200]!),
+                        ),
+                        child: Text(
+                          successMessage!,
+                          style: TextStyle(color: Colors.green[700], fontSize: 12),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
 
-                    // Specialization sections
-                    ...groupedShifts.entries.map((entry) {
-                      final specialization = entry.key;
-                      final specializationShifts = entry.value;
-                      final consolidatedShifts = _consolidateDoctorShifts(specializationShifts);
+                    const Text('Select a shift to edit:'),
+                    const SizedBox(height: 8),
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        elevation: 2,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // Specialization header
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(4),
-                                  topRight: Radius.circular(4),
+                    // Shifts list
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: shifts.length,
+                        itemBuilder: (context, index) {
+                          final shift = shifts[index];
+                          final date = DateTime.parse(shift.date);
+                          final isSelected = selectedShift != null &&
+                              selectedShift!.doctorId == shift.doctorId &&
+                              selectedShift!.date == shift.date;
+
+                          return ListTile(
+                            dense: true,
+                            selected: isSelected,
+                            selectedTileColor: Colors.blue[50],
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: isSelected ? Colors.blue[100] : Colors.grey[200],
+                              child: Text(
+                                date.day.toString(),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: isSelected ? Colors.blue[700] : Colors.grey[700],
                                 ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.medical_services, color: Colors.blue.shade700),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      specialization.toUpperCase(),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.blue.shade700,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue.shade700,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      '${specializationShifts.length} shifts',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ),
                             ),
+                            title: Text(
+                              _formatDialogDate(date),
+                              style: TextStyle(
+                                fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text(
+                              _getDayName(date),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            trailing: Icon(
+                              isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                              color: isSelected ? Colors.blue[700] : Colors.grey,
+                            ),
+                            onTap: isLoading ? null : () {
+                              print('Shift selected: ${shift.date}'); // Debug print
+                              setDialogState(() {
+                                selectedShift = shift;
+                                selectedNewDate = null;
+                                errorMessage = null;
+                                successMessage = null;
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
 
-                            // Shifts table for this specialization
-                            if (_isExpanded)
-                              SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: DataTable(
-                                  columnSpacing: 20,
-                                  headingRowColor: MaterialStateProperty.all(Colors.grey.shade100),
-                                  columns: const [
-                                    DataColumn(
-                                      label: Text('Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    ),
-                                    DataColumn(
-                                      label: Text('Seniority', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    ),
-                                    DataColumn(
-                                      label: Text('Assigned Dates', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    ),
-                                    DataColumn(
-                                      label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                  rows: consolidatedShifts.entries.map((doctorEntry) {
-                                    final doctorId = doctorEntry.key;
-                                    final dates = doctorEntry.value;
-                                    final doctorName = _getDoctorName(doctorId, allDoctors);
-                                    final doctor = allDoctors.firstWhere(
-                                          (d) => d.id == doctorId,
-                                      orElse: () => Doctor(id: doctorId, name: 'Unknown', specialization: '', seniority: ''),
-                                    );
-
-                                    return DataRow(
-                                      cells: [
-                                        DataCell(
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Text(
-                                                doctorName,
-                                                style: const TextStyle(fontWeight: FontWeight.w500),
-                                              ),
-                                              Text(
-                                                'ID: $doctorId',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey.shade600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        DataCell(
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: _getSeniorityColor(doctor.seniority),
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                            child: Text(
-                                              doctor.seniority ?? 'Unknown',
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        DataCell(
-                                          Wrap(
-                                            spacing: 4,
-                                            runSpacing: 4,
-                                            children: dates.map((date) {
-                                              final dayOfMonth = DateTime.parse(date).day;
-                                              return Chip(
-                                                label: Text(
-                                                  dayOfMonth.toString(),
-                                                  style: const TextStyle(fontSize: 12),
-                                                ),
-                                                backgroundColor: Colors.blue.shade100,
-                                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                padding: EdgeInsets.zero,
-                                              );
-                                            }).toList(),
-                                          ),
-                                        ),
-                                        DataCell(
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: dates.map((date) {
-                                              final shift = specializationShifts.firstWhere(
-                                                    (s) => s.doctorId == doctorId && s.date == date,
-                                              );
-                                              return Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  IconButton(
-                                                    icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
-                                                    tooltip: 'Edit $date',
-                                                    onPressed: () => _editShiftDate(context, shift),
-                                                  ),
-                                                  IconButton(
-                                                    icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                                                    tooltip: 'Delete $date',
-                                                    onPressed: () => _deleteShift(context, shift),
-                                                  ),
-                                                ],
-                                              );
-                                            }).toList(), // Only show actions for consolidated row
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  }).toList(),
+                    // Date picker section
+                    if (selectedShift != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange[200]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Editing shift for: ${_formatDialogDate(DateTime.parse(selectedShift!.date))}',
+                              style: const TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            const SizedBox(height: 8),
+                            if (selectedNewDate != null)
+                              Text(
+                                'New date: ${_formatDialogDate(selectedNewDate!)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.orange[700],
                                 ),
                               ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: isLoading ? null : () async {
+                                  print('Date picker pressed'); // Debug print
+
+                                  final provider = Provider.of<SectionShiftProvider>(context, listen: false);
+                                  final currentMonth = provider.currentMonth;
+
+                                  if (currentMonth == null) {
+                                    setDialogState(() {
+                                      errorMessage = 'No active session found';
+                                    });
+                                    return;
+                                  }
+
+                                  try {
+                                    final parts = currentMonth.split('-');
+                                    final year = int.parse(parts[0]);
+                                    final month = int.parse(parts[1]);
+
+                                    final firstDay = DateTime(year, month, 1);
+                                    final lastDay = DateTime(year, month + 1, 0);
+
+                                    final pickedDate = await showDatePicker(
+                                      context: dialogContext,
+                                      initialDate: DateTime.parse(selectedShift!.date),
+                                      firstDate: firstDay,
+                                      lastDate: lastDay,
+                                      helpText: 'Select new date',
+                                    );
+
+                                    print('Date picked: $pickedDate'); // Debug print
+
+                                    if (pickedDate != null) {
+                                      final dateString = pickedDate.toIso8601String().split('T')[0];
+
+                                      // Check if date is already taken
+                                      final isDateTaken = shifts.any((s) =>
+                                      s.date == dateString &&
+                                          !(s.doctorId == selectedShift!.doctorId && s.date == selectedShift!.date)
+                                      );
+
+                                      if (isDateTaken) {
+                                        setDialogState(() {
+                                          errorMessage = 'Doctor already has a shift on ${_formatDialogDate(pickedDate)}';
+                                        });
+                                      } else {
+                                        setDialogState(() {
+                                          selectedNewDate = pickedDate;
+                                          errorMessage = null;
+                                        });
+                                      }
+                                    }
+                                  } catch (e) {
+                                    setDialogState(() {
+                                      errorMessage = 'Error selecting date: $e';
+                                    });
+                                  }
+                                },
+                                icon: const Icon(Icons.calendar_month),
+                                label: Text(selectedNewDate == null ? 'Select New Date' : 'Change Date'),
+                              ),
+                            ),
                           ],
                         ),
-                      );
-                    }).toList(),
-
-                    const SizedBox(height: 24),
-
-                    // Action buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              sessionProvider.goToPreviousStep();
-                            },
-                            icon: const Icon(Icons.add),
-                            label: const Text('Add More Shifts'),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: shifts.isNotEmpty ? () {
-                              // Mark review as complete and trigger callback
-                              widget.onReviewComplete?.call();
-
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Section shifts review completed!'),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            } : null,
-                            icon: const Icon(Icons.check),
-                            label: const Text('Complete Review'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ],
                 ),
               ),
+              actions: [
+                TextButton(
+                  onPressed: isLoading ? null : () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: (selectedShift != null &&
+                      selectedNewDate != null &&
+                      selectedNewDate!.toIso8601String().split('T')[0] != selectedShift!.date &&
+                      !isLoading)
+                      ? () async {
+                    print('Save button pressed'); // Debug print
+
+                    setDialogState(() {
+                      isLoading = true;
+                      errorMessage = null;
+                      successMessage = null;
+                    });
+
+                    try {
+                      final newDateString = selectedNewDate!.toIso8601String().split('T')[0];
+
+                      final success = await _updateShiftDate(selectedShift!, newDateString);
+
+                      if (success) {
+                        setDialogState(() {
+                          successMessage = 'Shift updated successfully';
+                        });
+
+                        // Close dialog after showing success
+                        Future.delayed(const Duration(milliseconds: 1000), () {
+                          if (mounted) Navigator.of(dialogContext).pop();
+                        });
+                      } else {
+                        final provider = Provider.of<SectionShiftProvider>(context, listen: false);
+                        setDialogState(() {
+                          errorMessage = provider.errorMessage ?? 'Failed to update shift';
+                        });
+                      }
+                    } catch (e) {
+                      print('Error saving: $e'); // Debug print
+                      setDialogState(() {
+                        errorMessage = 'Error: $e';
+                      });
+                    } finally {
+                      setDialogState(() {
+                        isLoading = false;
+                      });
+                    }
+                  }
+                      : null,
+                  icon: isLoading
+                      ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                      : const Icon(Icons.save),
+                  label: Text(isLoading ? 'Saving...' : 'Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+// Keep these helper methods the same
+  Future<bool> _updateShiftDate(SectionShift shift, String newDate) async {
+    try {
+      final provider = Provider.of<SectionShiftProvider>(context, listen: false);
+      return await provider.updateSectionShiftDate(shift.id!, newDate);
+    } catch (e) {
+      print('Error updating shift date: $e');
+      return false;
+    }
+  }
+
+  String _formatDialogDate(DateTime date) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  String _getDayName(DateTime date) {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    return days[date.weekday - 1];
+  }
+
+  void _deleteAllShiftsForDoctor(BuildContext context, int doctorId, List<SectionShift> shifts) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete All Shifts'),
+          content: const Text('Are you sure you want to delete all shifts for this doctor?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                try {
+                  final provider = Provider.of<SectionShiftProvider>(context, listen: false);
+                  for (final shift in shifts) {
+                    await provider.removeSectionShift(shift);
+                  }
+                  Navigator.of(context).pop();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Shifts deleted successfully')),
+                    );
+                  }
+                } catch (e) {
+                  Navigator.of(context).pop();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error deleting shifts: $e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Delete All'),
             ),
           ],
         );

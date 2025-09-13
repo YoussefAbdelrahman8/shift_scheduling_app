@@ -70,6 +70,7 @@ class SectionShiftProvider with ChangeNotifier {
     _clearMessages();
     notifyListeners();
   }
+
 // Add these methods to your SectionShiftProvider class:
 
   /// Get specializations that still have unassigned doctors
@@ -648,7 +649,61 @@ class SectionShiftProvider with ChangeNotifier {
 
   // ==================== VALIDATION ====================
 
-  /// Validate session state
+  Future<bool> removeSectionShift(SectionShift shift) async {
+    if (!_validateSession()) return false;
+
+    try {
+      _setLoading(true);
+      clearError();
+
+      print('🗑️ Attempting to remove section shift: Doctor ${shift.doctorId}, Date ${shift.date}');
+
+      // Remove from database first
+      final dbHelper = DatabaseHelper.instance;
+      final success = await dbHelper.deleteSectionShift(shift.id ?? 0);
+
+
+
+      // Remove from local list
+      _currentSessionSectionShifts.removeWhere((s) =>
+      s.doctorId == shift.doctorId &&
+          s.date == shift.date
+      );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      // Update session provider progress
+      _sessionProvider.updateSectionShiftsProgress(_currentSessionSectionShifts.length);
+
+      // Recheck step completion status
+      _checkStepCompletion();
+
+      _setSuccess('Section shift removed successfully');
+      print('✅ Section shift removed successfully');
+
+      return true;
+
+    } catch (e) {
+      _setError('Failed to remove section shift: $e');
+      print('❌ Error removing section shift: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
 
 
   // ==================== HELPER METHODS ====================

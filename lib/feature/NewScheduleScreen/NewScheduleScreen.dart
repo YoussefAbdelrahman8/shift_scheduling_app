@@ -1,13 +1,13 @@
+// Fixed NewScheduleScreen.dart with comprehensive error handling
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shift_scheduling_app/feature/DoctorConstraintDataScreen/DoctorConstraintDataScreen.dart';
-import 'package:shift_scheduling_app/feature/SectionScheduleListScreen/SectionScheduleListScreen.dart';
-import 'package:shift_scheduling_app/feature/insertSecSchedules/InsertSectionShiftScreen.dart';
-import '../../ReceptionOverviewScreen.dart';
+
 import '../../providers/ScheduleSessionProvider.dart';
+import '../SectionScheduleListScreen/SectionScheduleListScreen.dart';
+import '../insertSecSchedules/InsertSectionShiftScreen.dart';
 
 class NewScheduleScreen extends StatefulWidget {
-  const NewScheduleScreen({super.key});
+  const NewScheduleScreen({Key? key}) : super(key: key);
 
   @override
   State<NewScheduleScreen> createState() => _NewScheduleScreenState();
@@ -15,37 +15,48 @@ class NewScheduleScreen extends StatefulWidget {
 
 class _NewScheduleScreenState extends State<NewScheduleScreen> {
   bool _isLoading = true;
-  String? _selectedMonth;
+  String? _initError;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _initializeSession();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeSession();
     });
   }
 
   Future<void> _initializeSession() async {
+    if (!mounted) return;
+
     try {
-      final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);  // ✅ FIXED: Correct provider name
+      setState(() {
+        _isLoading = true;
+        _initError = null;
+      });
 
-      // Get current month or let user select
-      _selectedMonth = _getCurrentMonth();
+      final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
+      final currentMonth = _getCurrentMonth();
 
-      // Start the scheduling session
-      final success = await provider.startSession(_selectedMonth!);
+      final success = await provider.startSession(currentMonth);
 
-      if (!success) {
-        _showError(provider.errorMessage ?? 'Failed to start session');
-        if (mounted) Navigator.pop(context);
+      if (!success && mounted) {
+        setState(() {
+          _initError = provider.errorMessage ?? 'Failed to start session';
+          _isLoading = false;
+        });
         return;
       }
 
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-      _showError('Failed to initialize session: $e');
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        setState(() {
+          _initError = 'Failed to initialize session: $e';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -54,358 +65,169 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
     return '${now.year}-${now.month.toString().padLeft(2, '0')}';
   }
 
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-
-  void _showSuccess(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  // ✅ FIXED: Proper step completion handling
-  void _onStepCompleted(ScheduleStep step) {
-    final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-    provider.markStepCompleted(step, true);
-  }
-
-  // ✅ FIXED: Step navigation methods
-  void _handleStepTap(int stepIndex) {
-    final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-    provider.goToStep(stepIndex);
-  }
-
-  void _handleStepCancel() {
-    final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-
-    if (provider.currentStepIndex == 0) {
-      // Cancel entire session
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Cancel Schedule Creation'),
-          content: const Text('Are you sure you want to cancel? All progress will be lost.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('No'),
-            ),
-            TextButton(
-              onPressed: () {
-                provider.cancelSession();
-                Navigator.pop(context); // Close dialog
-                Navigator.pop(context); // Close screen
-              },
-              child: const Text('Yes'),
-            ),
-          ],
-        ),
-      );
-    } else {
-      // Go to previous step
-      provider.goToPreviousStep();
-    }
-  }
-
-  void _handleStepContinue() {
-    final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-
-    if (provider.currentStepIndex == 4) {
-      // Complete session
-      _finishProcess();
-    } else {
-      // Go to next step
-      provider.goToNextStep();
-    }
-  }
-
-  bool _canProceedToNext(ScheduleSessionProvider provider) {
-    // ✅ FIXED: Proper validation logic
-    return provider.isCurrentStepCompleted;
-  }
-
-  Future<void> _finishProcess() async {
-    final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-
-    try {
-      await provider.completeSession();
-      _showSuccess("Schedule created successfully!");
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      _showError('Error completing schedule: $e');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Handle loading state
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text("New Schedule"),
+          backgroundColor: Colors.blueAccent,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Initializing schedule session...'),
+            ],
+          ),
         ),
       );
     }
 
-    return Consumer<ScheduleSessionProvider>(  // ✅ FIXED: Correct provider name
-      builder: (context, provider, child) {
-        // ✅ FIXED: Better error handling
-        if (!provider.isSessionActive) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('Error')),
-            body: const Center(
-              child: Column(
+    // Handle initialization error
+    if (_initError != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text("New Schedule"),
+          backgroundColor: Colors.blueAccent,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              Text(
+                'Initialization Error',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Text(
+                  _initError!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  SizedBox(height: 16),
-                  Text('Session not active. Please restart.'),
+                  OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Go Back'),
+                  ),
+                  const SizedBox(width: 16),
+                  ElevatedButton(
+                    onPressed: _initializeSession,
+                    child: const Text('Retry'),
+                  ),
                 ],
               ),
-            ),
-          );
-        }
+            ],
+          ),
+        ),
+      );
+    }
 
-        final stepNames = provider.getStepNames();
-        final stepDescriptions = provider.getStepDescriptions();
-
-        // ✅ FIXED: Proper step content widgets with error handling
-        final steps = <Step>[
-          Step(
-            title: Text(stepNames[0]),
-            subtitle: Text(stepDescriptions[0]),
-            content: _buildStepContent(0, provider),
-            isActive: provider.currentStepIndex == 0,
-            state: _getStepState(ScheduleStep.insertSectionShifts, provider),
-          ),
-          Step(
-            title: Text(stepNames[1]),
-            subtitle: Text(stepDescriptions[1]),
-            content: _buildStepContent(1, provider),
-            isActive: provider.currentStepIndex == 1,
-            state: _getStepState(ScheduleStep.viewSectionShifts, provider),
-          ),
-          Step(
-            title: Text(stepNames[2]),
-            subtitle: Text(stepDescriptions[2]),
-            content: _buildStepContent(2, provider),
-            isActive: provider.currentStepIndex == 2,
-            state: _getStepState(ScheduleStep.enterDoctorConstraints, provider),
-          ),
-          Step(
-            title: Text(stepNames[3]),
-            subtitle: Text(stepDescriptions[3]),
-            content: _buildStepContent(3, provider),
-            isActive: provider.currentStepIndex == 3,
-            state: _getStepState(ScheduleStep.reviewDoctorConstraints, provider),
-          ),
-          Step(
-            title: Text(stepNames[4]),
-            subtitle: Text(stepDescriptions[4]),
-            content: _buildStepContent(4, provider),
-            isActive: provider.currentStepIndex == 4,
-            state: _getStepState(ScheduleStep.generateReceptionSchedule, provider),
-          ),
-        ];
-
+    // Main content with error boundary
+    return Consumer<ScheduleSessionProvider>(
+      builder: (context, provider, child) {
         return Scaffold(
           appBar: AppBar(
-            title: Text("New Schedule - ${provider.currentMonth}"),
+            title: Text("New Schedule - ${provider.currentMonth ?? 'Unknown'}"),
             backgroundColor: Colors.blueAccent,
             foregroundColor: Colors.white,
             actions: [
-              // Session controls
               IconButton(
-                icon: const Icon(Icons.pause),
-                onPressed: provider.sessionStatus == SessionStatus.active
-                    ? provider.pauseSession
-                    : provider.resumeSession,
-                tooltip: provider.sessionStatus == SessionStatus.active
-                    ? 'Pause Session'
-                    : 'Resume Session',
+                icon: const Icon(Icons.info_outline),
+                onPressed: () => _showSessionInfo(context, provider),
+                tooltip: 'Session Info',
               ),
             ],
           ),
-          body: Column(
-            children: [
-              // Progress indicator
-              Container(
-                padding: const EdgeInsets.all(16),
-                color: Colors.blue.shade50,
-                child: Column(
-                  children: [
-                    LinearProgressIndicator(
-                      value: provider.overallProgress,
-                      backgroundColor: Colors.grey.shade300,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          body: SafeArea(
+            child: Column(
+              children: [
+                // Progress indicator
+                if (provider.isSessionActive) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    color: Colors.blue[50],
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Progress: ${(provider.overallProgress * 100).round()}%'),
-                        Text('${provider.completedStepsCount}/${stepNames.length} completed'),
+                        Text(
+                          'Progress: Step ${provider.currentStepIndex + 1} of ${_getStepCount()}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: (provider.currentStepIndex + 1) / _getStepCount(),
+                          backgroundColor: Colors.grey[300],
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
+                        ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-
-              // Error/Success Messages
-              if (provider.errorMessage != null)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  color: Colors.red.shade50,
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red.shade700),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          provider.errorMessage!,
-                          style: TextStyle(color: Colors.red.shade700),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () {
-                          // ✅ FIXED: Proper method call
-                          final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-                          // You'll need to add this method to your provider
-                          // provider.clearError();
-                        },
-                        icon: Icon(Icons.close, color: Colors.red.shade700),
-                      ),
-                    ],
                   ),
-                ),
+                ],
 
-              if (provider.successMessage != null)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  color: Colors.green.shade50,
-                  child: Row(
-                    children: [
-                      Icon(Icons.check_circle_outline, color: Colors.green.shade700),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          provider.successMessage!,
-                          style: TextStyle(color: Colors.green.shade700),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () {
-                          // ✅ FIXED: Proper method call
-                          final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-                          // You'll need to add this method to your provider
-                          // provider.clearSuccess();
-                        },
-                        icon: Icon(Icons.close, color: Colors.green.shade700),
-                      ),
-                    ],
-                  ),
-                ),
-
-              // Stepper
-              Expanded(
-                child: Stepper(
-                  type: StepperType.vertical,
-                  currentStep: provider.currentStepIndex,
-                  onStepTapped: _handleStepTap,
-                  controlsBuilder: (context, details) {
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Row(
-                        children: [
-                          // Previous/Cancel Button
-                          if (provider.currentStepIndex >= 0)
-                            OutlinedButton.icon(
-                              onPressed: _handleStepCancel,
-                              icon: Icon(provider.currentStepIndex == 0 ? Icons.close : Icons.arrow_back),
-                              label: Text(provider.currentStepIndex == 0 ? 'Cancel' : 'Previous'),
-                            ),
-
-                          const SizedBox(width: 12),
-
-                          // Next/Finish Button
-                          ElevatedButton.icon(
-                            onPressed: _canProceedToNext(provider) ? _handleStepContinue : null,
-                            icon: Icon(
-                              provider.currentStepIndex == steps.length - 1
-                                  ? Icons.check
-                                  : Icons.arrow_forward,
-                            ),
-                            label: Text(
-                              provider.currentStepIndex == steps.length - 1
-                                  ? 'Finish'
-                                  : 'Next',
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: provider.currentStepIndex == steps.length - 1
-                                  ? Colors.green
-                                  : Colors.blue,
-                              foregroundColor: Colors.white,
-                            ),
+                // Error display
+                if (provider.errorMessage != null) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    color: Colors.red[50],
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red[700]),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            provider.errorMessage!,
+                            style: TextStyle(color: Colors.red[700]),
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                  steps: steps,
+                        ),
+                        IconButton(
+                          onPressed: provider.clearError,
+                          icon: Icon(Icons.close, color: Colors.red[700]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Main stepper content
+                Expanded(
+                  child: _buildStepperContent(provider),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
     );
   }
 
-  // ✅ FIXED: Safe step content building with error handling
-  Widget _buildStepContent(int stepIndex, ScheduleSessionProvider provider) {
+  Widget _buildStepperContent(ScheduleSessionProvider provider) {
     try {
-      switch (stepIndex) {
-        case 0:
-        // Step 1: Insert Section Shifts
-          return InsertSectionShiftScreen(
-            onSessionComplete: () => _onStepCompleted(ScheduleStep.insertSectionShifts),
-          );
-        case 1:
-        // Step 2: View Section Shifts
-          return PendingSchedulesTable(
-            onReviewComplete: () => _onStepCompleted(ScheduleStep.viewSectionShifts),
-          );
-        // case 2:
-        // // Step 3: Enter Doctor Constraints
-        //   return DoctorConstraintDataScreen(
-        //     onConstraintsComplete: () => _onStepCompleted(ScheduleStep.enterDoctorConstraints),
-        //   );
-        // case 3:
-        // // Step 4: Review Constraints
-        //   return ReceptionDataScreen(
-        //     onReviewComplete: () => _onStepCompleted(ScheduleStep.reviewDoctorConstraints),
-        //   );
-        // case 4:
-        // // Step 5: Generate Schedule
-        //   return ReceptionOverviewScreen(
-        //     onGenerationComplete: () => _onStepCompleted(ScheduleStep.generateReceptionSchedule),
-        //   );
-        default:
-          return const Center(
-            child: Text('Step not implemented yet'),
-          );
-      }
+      // Safe step building with proper error handling
+      final steps = _buildSteps(provider);
+
+      return Stepper(
+        type: StepperType.vertical,
+        currentStep: provider.currentStepIndex,
+        onStepTapped: (index) => _handleStepTap(index, provider),
+        controlsBuilder: (context, details) => _buildControls(context, details, provider),
+        steps: steps,
+      );
     } catch (e) {
       return Center(
         child: Column(
@@ -413,37 +235,214 @@ class _NewScheduleScreenState extends State<NewScheduleScreen> {
           children: [
             const Icon(Icons.error_outline, size: 48, color: Colors.red),
             const SizedBox(height: 16),
-            Text('Error loading step content: $e'),
+            Text('Error building stepper: $e'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => setState(() {}), // Trigger rebuild
+              child: const Text('Retry'),
+            ),
           ],
         ),
       );
     }
   }
 
-  StepState _getStepState(ScheduleStep step, ScheduleSessionProvider provider) {
-    final isCompleted = provider.stepCompletionStatus[step] ?? false;
-    final currentStep = provider.currentStep;
+  List<Step> _buildSteps(ScheduleSessionProvider provider) {
+    return [
+      Step(
+        title: const Text('Insert Section Shifts'),
+        content: _buildStepContent(0, provider),
+        isActive: provider.currentStepIndex == 0,
+        state: _getStepState(0, provider),
+      ),
+      Step(
+        title: const Text('Review Section Shifts'),
+        content: _buildStepContent(1, provider),
+        isActive: provider.currentStepIndex == 1,
+        state: _getStepState(1, provider),
+      ),
+      // Add more steps as needed
+    ];
+  }
 
-    if (isCompleted) {
+  Widget _buildStepContent(int stepIndex, ScheduleSessionProvider provider) {
+    try {
+      switch (stepIndex) {
+        case 0:
+          return SizedBox(
+            height: 400, // Fixed height to prevent render issues
+            child: InsertSectionShiftScreen(
+              key: const ValueKey('insert_section_shifts'), // Add key for stability
+              onSessionComplete: () => _onStepCompleted(stepIndex),
+            ),
+          );
+        case 1:
+          return SizedBox(
+            height: 400, // Fixed height to prevent render issues
+            child: PendingSchedulesTable(
+              key: const ValueKey('pending_schedules'), // Add key for stability
+              onReviewComplete: () => _onStepCompleted(stepIndex),
+            ),
+          );
+        default:
+          return const SizedBox(
+            height: 200,
+            child: Center(
+              child: Text('Step not implemented yet'),
+            ),
+          );
+      }
+    } catch (e) {
+      return SizedBox(
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 32, color: Colors.red),
+              const SizedBox(height: 8),
+              Text('Error loading step: $e'),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildControls(BuildContext context, ControlsDetails details, ScheduleSessionProvider provider) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          // Previous/Cancel Button
+          if (provider.currentStepIndex > 0)
+            OutlinedButton.icon(
+              onPressed: details.onStepCancel,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Previous'),
+            )
+          else
+            OutlinedButton.icon(
+              onPressed: () => _handleCancel(context, provider),
+              icon: const Icon(Icons.close),
+              label: const Text('Cancel'),
+            ),
+
+          const SizedBox(width: 12),
+
+          // Next/Finish Button
+          ElevatedButton.icon(
+            onPressed: _canProceedToNext(provider) ? details.onStepContinue : null,
+            icon: Icon(
+              provider.currentStepIndex == _getStepCount() - 1
+                  ? Icons.check
+                  : Icons.arrow_forward,
+            ),
+            label: Text(
+              provider.currentStepIndex == _getStepCount() - 1
+                  ? 'Finish'
+                  : 'Next',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  StepState _getStepState(int stepIndex, ScheduleSessionProvider provider) {
+    if (stepIndex < provider.currentStepIndex) {
       return StepState.complete;
-    } else if (step == currentStep) {
+    } else if (stepIndex == provider.currentStepIndex) {
       return StepState.indexed;
     } else {
       return StepState.disabled;
     }
   }
 
+  int _getStepCount() => 2; // Adjust based on your actual step count
+
+  bool _canProceedToNext(ScheduleSessionProvider provider) {
+    // Add your step completion validation logic here
+    switch (provider.currentStepIndex) {
+      case 0:
+      // Check if section shifts have been added
+        return true; // Implement your validation
+      case 1:
+      // Check if review is complete
+        return true; // Implement your validation
+      default:
+        return false;
+    }
+  }
+
+  void _handleStepTap(int index, ScheduleSessionProvider provider) {
+    // Only allow tapping to completed steps or current step
+    if (index <= provider.currentStepIndex) {
+      provider.goToStep(index);
+    }
+  }
+
+  void _onStepCompleted(int stepIndex) {
+    final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
+
+    // Mark step as completed and move to next step if applicable
+    if (stepIndex < _getStepCount() - 1) {
+      provider.goToStep(stepIndex + 1);
+    }
+  }
+
+  void _handleCancel(BuildContext context, ScheduleSessionProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Schedule Creation'),
+        content: const Text('Are you sure you want to cancel? All progress will be lost.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Continue'),
+          ),
+          TextButton(
+            onPressed: () {
+              provider.cancelSession();
+              Navigator.of(context).pop(); // Close dialog
+              Navigator.of(context).pop(); // Close screen
+            },
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSessionInfo(BuildContext context, ScheduleSessionProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Session Information'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Month: ${provider.currentMonth ?? 'Unknown'}'),
+            Text('Current Step: ${provider.currentStepIndex + 1}'),
+            Text('Status: ${provider.sessionStatus.toString().split('.').last}'),
+            Text('Active: ${provider.isSessionActive}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
-    // Clean up session if still active
-    try {
-      final provider = Provider.of<ScheduleSessionProvider>(context, listen: false);
-      if (provider.isSessionActive) {
-        provider.cancelSession();
-      }
-    } catch (e) {
-      // Ignore disposal errors
-    }
+    // Clean up if needed
     super.dispose();
   }
 }
