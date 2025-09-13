@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
-import '../../core/models/Doctor.dart';
-import '../../core/models/SectionShift.dart';
+import '../../providers/ScheduleSessionProvider.dart';
 import '../../providers/SectionShiftProvider.dart';
+
+import '../../core/models/SectionShift.dart';
+import '../../core/models/Doctor.dart';
 
 class PendingSchedulesTable extends StatefulWidget {
   final VoidCallback? onReviewComplete;
@@ -16,108 +17,86 @@ class PendingSchedulesTable extends StatefulWidget {
 
 class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
   bool _isExpanded = true;
-  bool _debugMode = false; // Set to true for debugging
 
   @override
   void initState() {
     super.initState();
-    // Initialize for current session
+    // Initialize the provider when entering this step
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeData();
+      final provider = context.read<SectionShiftProvider>();
+      provider.initializeForSession();
     });
   }
 
-  Future<void> _initializeData() async {
-    try {
-      final provider = context.read<SectionShiftProvider>();
-      print('🔄 Initializing PendingSchedulesTable...');
-      print('📊 Provider session active: ${provider.isSessionActive}');
-      print('📅 Current month: ${provider.currentMonth}');
+  Future<void> _editShiftDate(BuildContext context, SectionShift shift) async {
+    if (shift.id == null) return;
 
-      await Future.delayed(const Duration(milliseconds: 100));
-      provider.initializeForSession();
-
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      print('❌ Error initializing data: $e');
-    }
-  }
-
-  Future<void> _editShiftDate(SectionShift shift, Doctor doctor) async {
     final provider = context.read<SectionShiftProvider>();
+    final sessionProvider = context.read<ScheduleSessionProvider>();
 
-    DateTime currentDate = DateTime.parse(shift.date);
-    final currentMonth = provider.currentMonth;
+    // Get current month for date constraints
+    final currentMonth = sessionProvider.currentMonth;
+    if (currentMonth == null) return;
 
-    DateTime firstDate = DateTime.now();
-    DateTime lastDate = DateTime.now();
-
-    if (currentMonth != null) {
-      final year = int.parse(currentMonth.substring(0, 4));
-      final month = int.parse(currentMonth.substring(5, 7));
-      firstDate = DateTime(year, month, 1);
-      lastDate = DateTime(year, month + 1, 0);
-    }
+    final currentDate = DateTime.tryParse(shift.date) ?? DateTime.now();
+    final monthParts = currentMonth.split('-');
+    final year = int.parse(monthParts[0]);
+    final month = int.parse(monthParts[1]);
 
     DateTime? picked = await showDatePicker(
       context: context,
       initialDate: currentDate,
-      firstDate: firstDate,
-      lastDate: lastDate,
-      helpText: 'Edit shift date for ${doctor.name}',
+      firstDate: DateTime(year, month, 1),
+      lastDate: DateTime(year, month + 1, 0), // Last day of month
+      helpText: 'Select new date for shift',
+      confirmText: 'UPDATE',
+      cancelText: 'CANCEL',
     );
 
     if (picked != null) {
-      final newDateString = picked.toIso8601String().split('T').first;
+      final newDate = picked.toIso8601String().split('T').first;
 
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Update Shift Date'),
-          content: Text(
-              'Change ${doctor.name}\'s shift from ${shift.date} to $newDateString?'
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Update'),
-            ),
-          ],
-        ),
-      );
+      try {
+        // You'll need to implement this method in SectionShiftProvider
+        await provider.updateSectionShiftDate(shift.id!, newDate);
 
-      if (confirmed == true) {
-        await provider.deleteSectionShift(shift.id!);
-        provider.clearDates();
-        provider.addDate(newDateString);
-        provider.setSelectedDoctorId(doctor.id);
-        await provider.saveSectionShifts();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Shift date updated successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to update shift: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
 
-  Future<void> _deleteShift(SectionShift shift, Doctor doctor) async {
+  Future<void> _deleteShift(BuildContext context, SectionShift shift) async {
+    if (shift.id == null) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Shift'),
-        content: Text(
-            'Are you sure you want to delete ${doctor.name}\'s shift on ${shift.date}?'
-        ),
+        content: Text('Are you sure you want to delete the shift on ${shift.date}?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          TextButton(
             onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],
@@ -125,793 +104,540 @@ class _PendingSchedulesTableState extends State<PendingSchedulesTable> {
     );
 
     if (confirmed == true) {
-      final provider = context.read<SectionShiftProvider>();
-      await provider.deleteSectionShift(shift.id!);
+      try {
+        final provider = context.read<SectionShiftProvider>();
+        await provider.deleteSectionShift(shift.id!);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Deleted shift for ${doctor.name} on ${shift.date}'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    }
-  }
-
-  void _completeReview() {
-    if (widget.onReviewComplete != null) {
-      widget.onReviewComplete!();
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Section shifts review completed'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-  }
-
-  String _formatMonthYear(String monthString) {
-    try {
-      final parts = monthString.split('-');
-      if (parts.length == 2) {
-        final year = parts[0];
-        final month = int.parse(parts[1]);
-        const monthNames = [
-          '', 'January', 'February', 'March', 'April', 'May', 'June',
-          'July', 'August', 'September', 'October', 'November', 'December'
-        ];
-        if (month >= 1 && month <= 12) {
-          return '${monthNames[month]} $year';
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Shift deleted successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete shift: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
       }
-    } catch (e) {
-      print('❌ Error formatting month: $e');
     }
-    return monthString;
   }
 
-  Map<String, Map<Doctor, List<SectionShift>>> _groupShiftsBySpecializationAndDoctor(
-      List<SectionShift> shifts,
-      List<Doctor> doctors,
-      ) {
-    final grouped = <String, Map<Doctor, List<SectionShift>>>{};
-
-    if (shifts.isEmpty) {
-      print('⚠️ No shifts to group');
-      return grouped;
+  String _getDoctorName(int doctorId, List<Doctor> doctors) {
+    try {
+      final doctor = doctors.firstWhere((d) => d.id == doctorId);
+      return doctor.name;
+    } catch (e) {
+      return 'Unknown Doctor ($doctorId)';
     }
+  }
 
-    if (doctors.isEmpty) {
-      print('⚠️ No doctors available for grouping');
-      return grouped;
+  String _getDoctorSpecialization(int doctorId, List<Doctor> doctors) {
+    try {
+      final doctor = doctors.firstWhere((d) => d.id == doctorId);
+      return doctor.specialization ?? 'Unknown';
+    } catch (e) {
+      return 'Unknown';
     }
+  }
 
-    print('📊 Grouping ${shifts.length} shifts with ${doctors.length} doctors');
+  Color _getSeniorityColor(String? seniority) {
+    switch (seniority?.toLowerCase()) {
+      case 'junior':
+        return Colors.blue.shade100;
+      case 'mid-level':
+        return Colors.orange.shade100;
+      case 'senior':
+        return Colors.green.shade100;
+      case 'consultant':
+        return Colors.purple.shade100;
+      default:
+        return Colors.grey.shade100;
+    }
+  }
+
+  Map<String, List<SectionShift>> _groupShiftsBySpecialization(
+      List<SectionShift> shifts, List<Doctor> doctors) {
+    final grouped = <String, List<SectionShift>>{};
 
     for (final shift in shifts) {
-      Doctor? doctor;
-      try {
-        doctor = doctors.firstWhere((d) => d.id == shift.doctorId);
-      } catch (e) {
-        print('⚠️ Doctor not found for shift: doctorId=${shift.doctorId}');
-        // Skip shifts with missing doctors instead of creating placeholder
-        continue;
+      final specialization = _getDoctorSpecialization(shift.doctorId, doctors);
+      if (!grouped.containsKey(specialization)) {
+        grouped[specialization] = [];
       }
-
-      final specialization = doctor.specialization ?? 'Unknown';
-
-      grouped.putIfAbsent(specialization, () => {});
-      grouped[specialization]!.putIfAbsent(doctor, () => []);
-      grouped[specialization]![doctor]!.add(shift);
+      grouped[specialization]!.add(shift);
     }
 
-    // Sort dates within each doctor's shifts
-    for (final specialization in grouped.keys) {
-      for (final doctor in grouped[specialization]!.keys) {
-        grouped[specialization]![doctor]!.sort((a, b) => a.date.compareTo(b.date));
-      }
-    }
+    // Sort shifts within each specialization by date
+    grouped.forEach((key, value) {
+      value.sort((a, b) => a.date.compareTo(b.date));
+    });
 
-    print('✅ Grouped into ${grouped.length} specializations');
     return grouped;
   }
 
-  Widget _buildDebugInfo(SectionShiftProvider provider) {
-    if (!_debugMode) return const SizedBox.shrink();
+  Map<int, List<String>> _consolidateDoctorShifts(List<SectionShift> shifts) {
+    final consolidated = <int, List<String>>{};
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.yellow[50],
-        border: Border.all(color: Colors.yellow[300]!),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Debug Information',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.orange[800],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text('Session Active: ${provider.isSessionActive}'),
-          Text('Current Month: ${provider.currentMonth}'),
-          Text('Shifts Count: ${provider.currentSessionSectionShifts.length}'),
-          Text('Doctors Count: ${provider.allDoctors.length}'),
-          Text('Available Specializations: ${provider.availableSpecializations.length}'),
-          Text('Is Loading: ${provider.isLoading}'),
-          Text('Error Message: ${provider.errorMessage ?? 'None'}'),
-          Text('Success Message: ${provider.successMessage ?? 'None'}'),
-          const SizedBox(height: 8),
-          ElevatedButton(
-            onPressed: () async {
-              print('🔄 Manual refresh triggered');
-              await _initializeData();
-            },
-            child: const Text('Refresh Data'),
-          ),
-        ],
-      ),
-    );
+    for (final shift in shifts) {
+      if (!consolidated.containsKey(shift.doctorId)) {
+        consolidated[shift.doctorId] = [];
+      }
+      consolidated[shift.doctorId]!.add(shift.date);
+    }
+
+    // Sort dates for each doctor
+    consolidated.forEach((key, value) {
+      value.sort();
+    });
+
+    return consolidated;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SectionShiftProvider>(
-      builder: (context, provider, _) {
-        print('🔄 Building PendingSchedulesTable...');
-        print('📊 Session active: ${provider.isSessionActive}');
-        print('📅 Current month: ${provider.currentMonth}');
-        print('📋 Shifts: ${provider.currentSessionSectionShifts.length}');
-        print('👥 Doctors: ${provider.allDoctors.length}');
+    return Consumer2<SectionShiftProvider, ScheduleSessionProvider>(
+      builder: (context, sectionProvider, sessionProvider, child) {
+        final shifts = sectionProvider.currentSessionSectionShifts;
+        final allDoctors = sessionProvider.getAllSessionDoctors();
+        final currentMonth = sessionProvider.currentMonth;
 
-        // INCREASED HEIGHT: Changed maxHeight from 600 to 800
-        return ConstrainedBox(
-          constraints: const BoxConstraints(
-            minHeight: 300,
-            maxHeight: 800, // Increased from 600
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Debug Info (only in debug mode)
-              _buildDebugInfo(provider),
-
-              // Error Messages
-              if (provider.errorMessage != null)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    border: Border.all(color: Colors.red.shade200),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red.shade700),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          provider.errorMessage!,
-                          style: TextStyle(color: Colors.red.shade700),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: provider.clearError,
-                        icon: Icon(Icons.close, color: Colors.red.shade700),
-                      ),
-                    ],
-                  ),
-                ),
-
-              // Loading indicator
-              if (provider.isLoading)
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 16),
-                  child: LinearProgressIndicator(),
-                ),
-
-              // Main content - FIXED: Use Flexible instead of Expanded
-              Flexible(
-                child: _buildMainContent(provider),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildMainContent(SectionShiftProvider provider) {
-    if (!provider.isSessionActive) {
-      return _buildEmptyState(
-        icon: Icons.schedule,
-        title: 'No Active Session',
-        subtitle: 'Please start a schedule session first',
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Go Back'),
-          ),
-        ],
-      );
-    }
-
-    final shifts = provider.currentSessionSectionShifts;
-    final doctors = provider.allDoctors;
-
-    if (shifts.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.event_busy,
-        title: 'No Section Shifts Added Yet',
-        subtitle: 'Return to the previous step to add section shifts',
-        actions: [
-          OutlinedButton.icon(
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('Add Shifts'),
-          ),
-          const SizedBox(width: 16),
-          ElevatedButton.icon(
-            onPressed: _completeReview,
-            icon: const Icon(Icons.skip_next),
-            label: const Text('Skip to Next Step'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
-      );
-    }
-
-    if (doctors.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.people_outline,
-        title: 'No Doctors Data Available',
-        subtitle: 'Please check your doctor database',
-        actions: [
-          ElevatedButton(
-            onPressed: () async {
-              await _initializeData();
-            },
-            child: const Text('Refresh'),
-          ),
-        ],
-      );
-    }
-
-    return _buildScheduleTable(provider, shifts, doctors);
-  }
-
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required List<Widget> actions,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: TextStyle(color: Colors.grey[600]),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: actions,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScheduleTable(SectionShiftProvider provider, List<SectionShift> shifts, List<Doctor> doctors) {
-    final groupedShifts = _groupShiftsBySpecializationAndDoctor(shifts, doctors);
-    final sortedSpecializations = groupedShifts.keys.toList()..sort();
-
-    if (groupedShifts.isEmpty) {
-      return const Center(
-        child: Text('Unable to group shifts by specialization'),
-      );
-    }
-
-    return SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header Section - MADE BIGGER
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 6,vertical: 20), // Increased from 20
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.blue[600]!, Colors.blue[400]!],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16), // Increased from 12
-            ),
+        // Handle loading state
+        if (sectionProvider.isLoading) {
+          return const Center(
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Loading section shifts...'),
+              ],
+            ),
+          );
+        }
+
+        // Handle empty state
+        if (shifts.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.schedule, size: 64, color: Colors.grey.shade400),
+                const SizedBox(height: 16),
                 Text(
-                  'Section Shifts Review',
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith( // Changed from headlineMedium
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+                  "No Section Shifts Created Yet",
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Colors.grey.shade600,
                   ),
                 ),
-                const SizedBox(height: 12), // Increased from 8
+                const SizedBox(height: 8),
                 Text(
-                  _formatMonthYear(provider.currentMonth ?? ''),
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith( // Changed from titleLarge
-                    color: Colors.white70,
+                  "Go back to the previous step to add section shifts",
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Colors.grey.shade500,
                   ),
                 ),
-                const SizedBox(height: 20), // Increased from 16
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), // Increased padding
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(24), // Increased from 20
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.assignment_turned_in, color: Colors.white, size: 24), // Increased from 20
-                      const SizedBox(width: 12), // Increased from 8
-                      Text(
-                        '${shifts.length} Total Shifts',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16, // Added explicit font size
-                        ),
-                      ),
-                      const SizedBox(width: 24), // Increased from 16
-                      const Icon(Icons.people, color: Colors.white, size: 24), // Increased from 20
-                      const SizedBox(width: 12), // Increased from 8
-                      Text(
-                        '${provider.getUniqueDoctorsWithShifts().length} Doctors',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16, // Added explicit font size
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    sessionProvider.goToPreviousStep();
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text("Add Section Shifts"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
                 ),
               ],
             ),
-          ),
+          );
+        }
 
-          const SizedBox(height: 24), // Increased from 16
+        // Group shifts by specialization
+        final groupedShifts = _groupShiftsBySpecialization(shifts, allDoctors);
+        final uniqueDoctors = shifts.map((s) => s.doctorId).toSet().length;
 
-          // Content Section
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Expand/Collapse Control - MADE BIGGER
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16), // Increased from 12
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () => setState(() => _isExpanded = !_isExpanded),
-                      icon: Icon(_isExpanded ? Icons.expand_less : Icons.expand_more, size: 24), // Added size
-                      label: Text(
-                        _isExpanded ? 'Collapse All' : 'Expand All',
-                        style: const TextStyle(fontSize: 16), // Added font size
+        return Column(
+          children: [
+            // Header with statistics
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.blue.shade700, Colors.blue.shade500],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Section Shifts Review',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
+                      Text(
+                        currentMonth ?? '',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          '${shifts.length} Total Shifts',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          '$uniqueDoctors Doctors',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Error message display
+            if (sectionProvider.errorMessage != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                color: Colors.red.shade50,
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        sectionProvider.errorMessage!,
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: sectionProvider.clearError,
+                      icon: Icon(Icons.close, color: Colors.red.shade700),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 20), // Increased from 16
-
-              // Specializations - MADE BIGGER
-              ...sortedSpecializations.map((specialization) {
-                final doctorShifts = groupedShifts[specialization]!;
-                final totalShiftsInSpec = doctorShifts.values
-                    .map((shifts) => shifts.length)
-                    .fold(0, (sum, count) => sum + count);
-
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 10), // Increased margins
-                  child: Card(
-                    elevation: 4, // Increased from 2
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16), // Increased from default
+            // Success message display
+            if (sectionProvider.successMessage != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                color: Colors.green.shade50,
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle_outline, color: Colors.green.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        sectionProvider.successMessage!,
+                        style: TextStyle(color: Colors.green.shade700),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Specialization Header - MADE BIGGER
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(24), // Increased from 16
-                          decoration: BoxDecoration(
-                            color: Colors.blue[50],
-                            borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(16), // Increased from 12
-                              topRight: Radius.circular(16), // Increased from 12
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.medical_services, color: Colors.blue[700], size: 28), // Increased size
-                              const SizedBox(width: 16), // Increased from 12
-                              Expanded(
-                                child: Text(
-                                  specialization,
-                                  style: TextStyle(
-                                    fontSize: 20, // Increased from 18
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue[700],
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Increased padding
-                                decoration: BoxDecoration(
-                                  color: Colors.blue[100],
-                                  borderRadius: BorderRadius.circular(16), // Increased from 12
-                                ),
-                                child: Text(
-                                  '$totalShiftsInSpec shifts',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.blue[700],
-                                    fontSize: 14, // Added explicit font size
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                    IconButton(
+                      onPressed: sectionProvider.clearSuccess,
+                      icon: Icon(Icons.close, color: Colors.green.shade700),
+                    ),
+                  ],
+                ),
+              ),
 
-                        // Doctors Table - MADE BIGGER
-                        if (_isExpanded)
-                          Padding(
-                            padding:  const EdgeInsets.all(16), // Added padding around the table
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: DataTable(
-                                headingRowColor: MaterialStateProperty.all(Colors.grey[100]),
-                                columnSpacing: 40, // Increased from 20
-                                dataRowHeight: 80, // Increased row height from default (56)
-                                headingRowHeight: 64, // Increased heading height from default (56)
-                                // BIGGER COLUMN HEADERS
-                                columns: const [
-                                  DataColumn(
-                                    label: Padding(
-                                      padding: EdgeInsets.all(8.0), // Added padding
-                                      child: Text(
-                                        'Doctor',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16, // Increased font size
-                                        ),
+            // Main content
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Expand/Collapse all button
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${groupedShifts.length} Specializations',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _isExpanded = !_isExpanded;
+                            });
+                          },
+                          icon: Icon(_isExpanded ? Icons.expand_less : Icons.expand_more),
+                          label: Text(_isExpanded ? 'Collapse All' : 'Expand All'),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Specialization sections
+                    ...groupedShifts.entries.map((entry) {
+                      final specialization = entry.key;
+                      final specializationShifts = entry.value;
+                      final consolidatedShifts = _consolidateDoctorShifts(specializationShifts);
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        elevation: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Specialization header
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(4),
+                                  topRight: Radius.circular(4),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.medical_services, color: Colors.blue.shade700),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      specialization.toUpperCase(),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue.shade700,
+                                        fontSize: 16,
                                       ),
                                     ),
                                   ),
-                                  DataColumn(
-                                    label: Padding(
-                                      padding: EdgeInsets.all(8.0), // Added padding
-                                      child: Text(
-                                        'Seniority',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16, // Increased font size
-                                        ),
-                                      ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade700,
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
-                                  ),
-                                  DataColumn(
-                                    label: Padding(
-                                      padding: EdgeInsets.all(8.0), // Added padding
-                                      child: Text(
-                                        'Shift Dates (Click to Edit/Delete)',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16, // Increased font size
-                                        ),
+                                    child: Text(
+                                      '${specializationShifts.length} shifts',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                   ),
                                 ],
-                                rows: doctorShifts.entries.map((entry) {
-                                  final doctor = entry.key;
-                                  final doctorShiftsList = entry.value;
+                              ),
+                            ),
 
-                                  return DataRow(
-                                    cells: [
-                                      // BIGGER DOCTOR CELL
-                                      DataCell(
-                                        Padding(
-                                          padding: const EdgeInsets.all(12.0), // Added padding
-                                          child: Column(
+                            // Shifts table for this specialization
+                            if (_isExpanded)
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: DataTable(
+                                  columnSpacing: 20,
+                                  headingRowColor: MaterialStateProperty.all(Colors.grey.shade100),
+                                  columns: const [
+                                    DataColumn(
+                                      label: Text('Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                    DataColumn(
+                                      label: Text('Seniority', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                    DataColumn(
+                                      label: Text('Assigned Dates', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                    DataColumn(
+                                      label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                  rows: consolidatedShifts.entries.map((doctorEntry) {
+                                    final doctorId = doctorEntry.key;
+                                    final dates = doctorEntry.value;
+                                    final doctorName = _getDoctorName(doctorId, allDoctors);
+                                    final doctor = allDoctors.firstWhere(
+                                          (d) => d.id == doctorId,
+                                      orElse: () => Doctor(id: doctorId, name: 'Unknown', specialization: '', seniority: ''),
+                                    );
+
+                                    return DataRow(
+                                      cells: [
+                                        DataCell(
+                                          Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
                                               Text(
-                                                doctor.name,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 16, // Increased font size
-                                                ),
+                                                doctorName,
+                                                style: const TextStyle(fontWeight: FontWeight.w500),
                                               ),
-                                              const SizedBox(height: 4),
                                               Text(
-                                                '${doctorShiftsList.length} shifts',
+                                                'ID: $doctorId',
                                                 style: TextStyle(
-                                                  fontSize: 14, // Increased from 12
-                                                  color: Colors.grey[600],
+                                                  fontSize: 12,
+                                                  color: Colors.grey.shade600,
                                                 ),
                                               ),
                                             ],
                                           ),
                                         ),
-                                      ),
-                                      // BIGGER SENIORITY CELL
-                                      DataCell(
-                                        Padding(
-                                          padding: const EdgeInsets.all(12.0), // Added padding
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Increased padding
+                                        DataCell(
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                             decoration: BoxDecoration(
-                                              color: _getSeniorityColor(doctor.seniority ?? ''),
-                                              borderRadius: BorderRadius.circular(16), // Increased from 12
+                                              color: _getSeniorityColor(doctor.seniority),
+                                              borderRadius: BorderRadius.circular(8),
                                             ),
                                             child: Text(
                                               doctor.seniority ?? 'Unknown',
                                               style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 14, // Increased from 12
+                                                fontSize: 12,
                                                 fontWeight: FontWeight.w500,
                                               ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                      // BIGGER DATES CELL
-                                      DataCell(
-                                        Container(
-                                          width: 500, // Increased from 400
-                                          height: 70, // Increased from 50
-                                          padding: const EdgeInsets.all(8.0), // Added padding
-                                          child: SingleChildScrollView(
-                                            scrollDirection: Axis.horizontal,
-                                            child: Row(
-                                              children: doctorShiftsList.asMap().entries.map((entry) {
-                                                final index = entry.key;
-                                                final shift = entry.value;
-                                                return Container(
-                                                  margin: EdgeInsets.only(
-                                                    right: index < doctorShiftsList.length - 1 ? 12 : 0, // Increased spacing
-                                                  ),
-                                                  child: GestureDetector(
-                                                    onTap: () => _showShiftActionDialog(context, shift, doctor),
-                                                    child: Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Increased padding
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.green[100],
-                                                        borderRadius: BorderRadius.circular(12), // Increased from 8
-                                                        border: Border.all(color: Colors.green[300]!, width: 2), // Increased border width
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                            color: Colors.green.withOpacity(0.2), // Increased opacity
-                                                            blurRadius: 4, // Increased from 2
-                                                            offset: const Offset(0, 2), // Increased from (0, 1)
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.event,
-                                                            size: 18, // Increased from 14
-                                                            color: Colors.green[700],
-                                                          ),
-                                                          const SizedBox(width: 8), // Increased from 6
-                                                          Text(
-                                                            shift.date,
-                                                            style: TextStyle(
-                                                              fontSize: 14, // Increased from 12
-                                                              fontWeight: FontWeight.w500,
-                                                              color: Colors.green[700],
-                                                            ),
-                                                          ),
-                                                          const SizedBox(width: 6), // Increased from 4
-                                                          Icon(
-                                                            Icons.touch_app,
-                                                            size: 16, // Increased from 12
-                                                            color: Colors.green[600],
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                );
-                                              }).toList(),
-                                            ),
+                                        DataCell(
+                                          Wrap(
+                                            spacing: 4,
+                                            runSpacing: 4,
+                                            children: dates.map((date) {
+                                              final dayOfMonth = DateTime.parse(date).day;
+                                              return Chip(
+                                                label: Text(
+                                                  dayOfMonth.toString(),
+                                                  style: const TextStyle(fontSize: 12),
+                                                ),
+                                                backgroundColor: Colors.blue.shade100,
+                                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                padding: EdgeInsets.zero,
+                                              );
+                                            }).toList(),
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  );
-                                }).toList(),
+                                        DataCell(
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: dates.map((date) {
+                                              final shift = specializationShifts.firstWhere(
+                                                    (s) => s.doctorId == doctorId && s.date == date,
+                                              );
+                                              return Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  IconButton(
+                                                    icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                                                    tooltip: 'Edit $date',
+                                                    onPressed: () => _editShiftDate(context, shift),
+                                                  ),
+                                                  IconButton(
+                                                    icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                                    tooltip: 'Delete $date',
+                                                    onPressed: () => _deleteShift(context, shift),
+                                                  ),
+                                                ],
+                                              );
+                                            }).toList(), // Only show actions for consolidated row
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }).toList(),
+                                ),
                               ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+
+                    const SizedBox(height: 24),
+
+                    // Action buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              sessionProvider.goToPreviousStep();
+                            },
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add More Shifts'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-
-              const SizedBox(height: 32), // Increased from 24
-
-              // Action Buttons - MADE BIGGER
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20), // Increased from 16
-                child: Row(
-                  children: [
-                    const SizedBox(width: 20), // Increased from 16
-                    Expanded(
-                      flex: 2,
-                      child: ElevatedButton.icon(
-                        onPressed: _completeReview,
-                        icon: const Icon(Icons.check_circle, size: 24), // Added icon size
-                        label: const Text(
-                          'Complete Review',
-                          style: TextStyle(fontSize: 16), // Added font size
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 20), // Increased from 16
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12), // Added border radius
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: shifts.isNotEmpty ? () {
+                              // Mark review as complete and trigger callback
+                              widget.onReviewComplete?.call();
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Section shifts review completed!'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            } : null,
+                            icon: const Icon(Icons.check),
+                            label: const Text('Complete Review'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 20), // Increased from 16
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // BIGGER DIALOG
-  void _showShiftActionDialog(BuildContext context, SectionShift shift, Doctor doctor) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), // Added border radius
-        contentPadding: const EdgeInsets.all(24), // Increased padding
-        title: const Text(
-          'Manage Shift',
-          style: TextStyle(fontSize: 20), // Added font size
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Doctor: ${doctor.name}',
-              style: const TextStyle(fontSize: 16), // Added font size
-            ),
-            const SizedBox(height: 12), // Increased from 8
-            Text(
-              'Date: ${shift.date}',
-              style: const TextStyle(fontSize: 16), // Added font size
-            ),
-            const SizedBox(height: 20), // Increased from 16
-            Text(
-              'What would you like to do?',
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                color: Colors.grey[700],
-                fontSize: 16, // Added font size
-              ),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(fontSize: 16), // Added font size
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              _editShiftDate(shift, doctor);
-            },
-            icon: const Icon(Icons.edit, size: 20), // Increased from 18
-            label: const Text(
-              'Edit Date',
-              style: TextStyle(fontSize: 16), // Added font size
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.blue,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), // Added padding
-            ),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteShift(shift, doctor);
-            },
-            icon: const Icon(Icons.delete, size: 20), // Increased from 18
-            label: const Text(
-              'Delete',
-              style: TextStyle(fontSize: 16), // Added font size
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), // Added padding
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
-  }
-
-  Color _getSeniorityColor(String seniority) {
-    switch (seniority.toLowerCase()) {
-      case 'junior':
-        return Colors.green;
-      case 'mid-level':
-        return Colors.orange;
-      case 'senior':
-        return Colors.blue;
-      case 'consultant':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
   }
 }

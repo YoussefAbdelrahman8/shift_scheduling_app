@@ -130,7 +130,213 @@ class SectionShiftProvider with ChangeNotifier {
 
   // ==================== SPECIALIZATION MANAGEMENT ====================
 
+// Add these methods to your SectionShiftProvider class:
 
+  /// Update the date of a specific section shift
+  Future<bool> updateSectionShiftDate(int shiftId, String newDate) async {
+    if (!_validateSession()) return false;
+
+    _setLoading(true);
+
+    try {
+      // Validate the new date
+      if (!_validateDate(newDate)) return false;
+
+      // Check if the shift exists
+      final shift = _currentSessionSectionShifts.firstWhere(
+            (s) => s.id == shiftId,
+        orElse: () => throw Exception('Shift not found'),
+      );
+
+      // Check for duplicate (same doctor on same date)
+      final existingShift = await _checkForDuplicateShift(shift.doctorId, newDate);
+      if (existingShift) {
+        _setError('Doctor already has a shift on $newDate');
+        return false;
+      }
+
+      // Update in database
+      final updatedShift = SectionShift(
+        id: shiftId,
+        doctorId: shift.doctorId,
+        date: newDate,
+        // Add other properties as needed
+      );
+
+      await _dbHelper.updateSectionShift(updatedShift);
+
+      // Update local state
+      final index = _currentSessionSectionShifts.indexWhere((s) => s.id == shiftId);
+      if (index != -1) {
+        _currentSessionSectionShifts[index] = updatedShift;
+      }
+
+      // Update session provider progress
+      _sessionProvider.updateSectionShiftsProgress(_currentSessionSectionShifts.length);
+
+      _setSuccess('Shift date updated successfully');
+      return true;
+
+    } catch (e) {
+      _setError('Failed to update shift date: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Delete a specific section shift
+  Future<bool> deleteSectionShift(int shiftId) async {
+    if (!_validateSession()) return false;
+
+    _setLoading(true);
+
+    try {
+      // Delete from database
+      await _dbHelper.deleteSectionShift(shiftId);
+
+      // Remove from local state
+      _currentSessionSectionShifts.removeWhere((shift) => shift.id == shiftId);
+
+      // Update session provider progress
+      _sessionProvider.updateSectionShiftsProgress(_currentSessionSectionShifts.length);
+
+      // Re-check step completion
+      _checkStepCompletion();
+
+      _setSuccess('Section shift deleted successfully');
+      return true;
+
+    } catch (e) {
+      _setError('Failed to delete section shift: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Clear error message
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// Clear success message
+  void clearSuccess() {
+    _successMessage = null;
+    notifyListeners();
+  }
+
+  /// Check for duplicate shift (same doctor on same date)
+  Future<bool> _checkForDuplicateShift(int doctorId, String date) async {
+    try {
+      // Check in current session shifts
+      final hasLocal = _currentSessionSectionShifts.any(
+            (shift) => shift.doctorId == doctorId && shift.date == date,
+      );
+
+      if (hasLocal) return true;
+
+      // Check in database (in case of concurrent modifications)
+      final hasInDb = await _dbHelper.doctorHasShiftOnDate(doctorId, date);
+      return hasInDb;
+
+    } catch (e) {
+      print('Error checking for duplicate shift: $e');
+      return false;
+    }
+  }
+
+  /// Validate date format and constraints
+  bool _validateDate(String date) {
+    // Check date format (YYYY-MM-DD)
+    final dateRegex = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+    if (!dateRegex.hasMatch(date)) {
+      _setError('Invalid date format. Use YYYY-MM-DD format.');
+      return false;
+    }
+
+    // Check if date belongs to current month
+    if (currentMonth != null && !date.startsWith(currentMonth!)) {
+      _setError('Date must be in the current session month ($currentMonth).');
+      return false;
+    }
+
+    // Check if date is not in the past (optional)
+    final selectedDate = DateTime.parse(date);
+    final today = DateTime.now();
+    if (selectedDate.isBefore(DateTime(today.year, today.month, today.day))) {
+      _setError('Cannot select past dates.');
+      return false;
+    }
+
+    return true;
+  }
+
+  /// Validate session state
+  bool _validateSession() {
+    if (!isSessionActive) {
+      _setError('No active session. Please start a session first.');
+      return false;
+    }
+    return true;
+  }
+
+  /// Check if step should be marked complete
+  void _checkStepCompletion() {
+    // Step 1: Insert Section Shifts - complete when any shifts added
+    bool step1Complete = _currentSessionSectionShifts.isNotEmpty;
+    _sessionProvider.markStepCompleted(ScheduleStep.insertSectionShifts, step1Complete);
+
+    // Step 2: View Section Shifts - complete when minimum threshold reached
+    bool step2Complete = _hasMetViewStepCriteria();
+    _sessionProvider.markStepCompleted(ScheduleStep.viewSectionShifts, step2Complete);
+  }
+
+  /// Check if view step completion criteria are met
+  bool _hasMetViewStepCriteria() {
+    if (_currentSessionSectionShifts.isEmpty) return false;
+
+    // Option 1: Minimum number of shifts (e.g., at least 5)
+    if (_currentSessionSectionShifts.length < 5) return false;
+
+    // Option 2: All specializations have at least one shift
+    Set<String> specializationsWithShifts = {};
+    for (var shift in _currentSessionSectionShifts) {
+      final doctor = allDoctors.firstWhere(
+            (d) => d.id == shift.doctorId,
+        orElse: () => Doctor(id: shift.doctorId, name: '', specialization: '', seniority: ''),
+      );
+      if (doctor.specialization != null && doctor.specialization!.isNotEmpty) {
+        specializationsWithShifts.add(doctor.specialization!);
+      }
+    }
+
+    // Check if at least 50% of specializations are covered
+    return specializationsWithShifts.length >= (availableSpecializations.length * 0.5);
+  }
+
+  /// Set error message
+  void _setError(String error) {
+    _errorMessage = error;
+    _successMessage = null;
+    print('❌ SectionShift Error: $error');
+    notifyListeners();
+  }
+
+  /// Set success message
+  void _setSuccess(String message) {
+    _successMessage = message;
+    _errorMessage = null;
+    print('✅ SectionShift Success: $message');
+    notifyListeners();
+  }
+
+  /// Set loading state
+  void _setLoading(bool loading) {
+    _isLoading = loading;
+    notifyListeners();
+  }
   /// Set selected specialization and load doctors
   Future<void> setSelectedSpecialization(String? specialization) async {
     if (!_validateSession()) return;
@@ -252,22 +458,7 @@ class SectionShiftProvider with ChangeNotifier {
   }
 
   /// Validate date format and constraints
-  bool _validateDate(String date) {
-    // Check date format (YYYY-MM-DD)
-    final dateRegex = RegExp(r'^\d{4}-\d{2}-\d{2}$');
-    if (!dateRegex.hasMatch(date)) {
-      _setError('Invalid date format. Use YYYY-MM-DD format.');
-      return false;
-    }
 
-    // Check if date belongs to current month
-    if (currentMonth != null && !date.startsWith(currentMonth!)) {
-      _setError('Date must be in the current session month ($currentMonth).');
-      return false;
-    }
-
-    return true;
-  }
 
   // ==================== SAVE OPERATIONS ====================
 
@@ -348,27 +539,7 @@ class SectionShiftProvider with ChangeNotifier {
   }
 
   /// Check for duplicate section shift
-  Future<bool> _checkForDuplicateShift(int doctorId, String date) async {
-    try {
-      final existingShifts = await _dbHelper.getSectionShiftsByDate(date);
-      return existingShifts.any((shift) => shift.doctorId == doctorId);
-    } catch (e) {
-      return false; // If we can't check, allow the operation
-    }
-  }
 
-  /// Check if section shifts step should be marked as completed
-  void _checkStepCompletion() {
-    // Mark step as completed if we have section shifts and covered key specializations
-    if (_currentSessionSectionShifts.isNotEmpty) {
-      _sessionProvider.markStepCompleted(ScheduleStep.insertSectionShifts, true);
-
-      // Also mark view step as ready
-      if (_currentSessionSectionShifts.length >= 3) { // Minimum threshold
-        _sessionProvider.markStepCompleted(ScheduleStep.viewSectionShifts, true);
-      }
-    }
-  }
 
   /// Validate conditions before saving
   bool _validateSaveConditions() {
@@ -391,36 +562,6 @@ class SectionShiftProvider with ChangeNotifier {
   }
 
   // ==================== BULK OPERATIONS ====================
-
-  /// Delete a section shift
-  Future<bool> deleteSectionShift(int shiftId) async {
-    if (!_validateSession()) return false;
-
-    _setLoading(true);
-
-    try {
-      final result = await _dbHelper.deleteSectionShift(shiftId);
-
-      if (result > 0) {
-        // Remove from current session list
-        _currentSessionSectionShifts.removeWhere((shift) => shift.id == shiftId);
-
-        // Update session provider
-        _sessionProvider.updateSectionShiftsProgress(_currentSessionSectionShifts.length);
-
-        _setSuccess('Section shift deleted successfully.');
-        return true;
-      } else {
-        _setError('Failed to delete section shift.');
-        return false;
-      }
-    } catch (e) {
-      _setError('Failed to delete section shift: $e');
-      return false;
-    } finally {
-      _setLoading(false);
-    }
-  }
 
   /// Clear current form data but keep session active
   void resetCurrentForm() {
@@ -508,19 +649,7 @@ class SectionShiftProvider with ChangeNotifier {
   // ==================== VALIDATION ====================
 
   /// Validate session state
-  bool _validateSession() {
-    if (!isSessionActive) {
-      _setError('No active session. Please start a session first.');
-      return false;
-    }
 
-    if (currentMonth == null) {
-      _setError('No month specified for current session.');
-      return false;
-    }
-
-    return true;
-  }
 
   // ==================== HELPER METHODS ====================
 
@@ -533,26 +662,7 @@ class SectionShiftProvider with ChangeNotifier {
   }
 
   /// Set loading state
-  void _setLoading(bool loading) {
-    _isLoading = loading;
-    notifyListeners();
-  }
 
-  /// Set error message
-  void _setError(String error) {
-    _errorMessage = error;
-    _successMessage = null;
-    print('SectionShift Provider Error: $error');
-    notifyListeners();
-  }
-
-  /// Set success message
-  void _setSuccess(String message) {
-    _successMessage = message;
-    _errorMessage = null;
-    print('SectionShift Provider Success: $message');
-    notifyListeners();
-  }
 
   /// Clear all messages
   void _clearMessages() {
@@ -560,17 +670,7 @@ class SectionShiftProvider with ChangeNotifier {
     _successMessage = null;
   }
 
-  /// Clear error message
-  void clearError() {
-    _errorMessage = null;
-    notifyListeners();
-  }
 
-  /// Clear success message
-  void clearSuccess() {
-    _successMessage = null;
-    notifyListeners();
-  }
 
   /// Clear all messages publicly
   void clearAllMessages() {
