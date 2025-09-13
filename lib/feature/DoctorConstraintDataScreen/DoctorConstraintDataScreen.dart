@@ -5,21 +5,21 @@ import 'package:collection/collection.dart';
 import '../../core/models/Doctor.dart';
 import '../../providers/DoctorConstraintProvider.dart';
 
-class ReceptionDataScreen extends StatefulWidget {
+class DoctorConstraintDataScreen extends StatefulWidget {
   final VoidCallback? onConstraintsComplete;
   final VoidCallback? onReviewComplete;
 
-  const ReceptionDataScreen({
+  const DoctorConstraintDataScreen({
     Key? key,
     this.onConstraintsComplete,
     this.onReviewComplete,
   }) : super(key: key);
 
   @override
-  State<ReceptionDataScreen> createState() => _ReceptionDataScreenState();
+  State<DoctorConstraintDataScreen> createState() => _ReceptionDataScreenState();
 }
 
-class _ReceptionDataScreenState extends State<ReceptionDataScreen> {
+class _ReceptionDataScreenState extends State<DoctorConstraintDataScreen> {
   final _formKey = GlobalKey<FormState>();
   final _totalShiftsController = TextEditingController();
   final _morningShiftsController = TextEditingController();

@@ -7,10 +7,9 @@ import 'package:shift_scheduling_app/feature/signup/signup.dart';
 
 import '../../feature/Login/login.dart';
 import '../../feature/NewScheduleScreen/NewScheduleScreen.dart';
-import '../../feature/ReceptionDataScreen/ReceptionDataScreen.dart';
 
 import '../../feature/insertDoctor/insertDoctorScreen.dart';
-import '../../feature/insertSecSchedules/SectionScheduleScreen.dart';
+import '../../feature/insertSecSchedules/InsertSectionShiftScreen.dart';
 
 
 class RouteGenerator {

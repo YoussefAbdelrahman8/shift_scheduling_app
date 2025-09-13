@@ -398,7 +398,6 @@ class ScheduleSessionProvider with ChangeNotifier {
     _errorMessage = null;
     _successMessage = null;
   }
-
   /// Clear error message
   void clearError() {
     _errorMessage = null;

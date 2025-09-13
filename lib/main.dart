@@ -4,7 +4,7 @@ import 'package:shift_scheduling_app/providers/CoreSessionProvider.dart';
 import 'package:shift_scheduling_app/providers/DoctorConstraintProvider.dart';
 import 'package:shift_scheduling_app/providers/DoctorProvider.dart';
 
-import 'package:shift_scheduling_app/providers/SchedulingSessionProvider.dart';
+import 'package:shift_scheduling_app/providers/ScheduleSessionProvider.dart';
 import 'package:shift_scheduling_app/providers/SectionShiftProvider.dart';
 import 'core/routes_manager/route_generator.dart';
 import 'core/routes_manager/routes.dart';

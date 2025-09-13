@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../core/models/Doctor.dart';
 import '../core/models/SectionShift.dart';
 import '../db/DBHelper.dart';
-import 'SchedulingSessionProvider.dart';
+import 'ScheduleSessionProvider.dart';
 
 
 class SectionShiftProvider with ChangeNotifier {

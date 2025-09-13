@@ -5,7 +5,7 @@ import '../core/models/DoctorConstraint.dart';
 import '../core/models/DoctorRequest.dart';
 import '../core/models/ReceptionDrop.dart';
 import '../db/DBHelper.dart';
-import 'SchedulingSessionProvider.dart';
+import 'ScheduleSessionProvider.dart';
 
 enum ConstraintEntryStage {
   selectDoctor,           // Select which doctor to configure
@@ -733,23 +733,16 @@ class DoctorConstraintProvider with ChangeNotifier {
 
   /// Save doctor requests to database
   Future<void> _saveRequestsForCurrentDoctor() async {
-    if (_currentDoctorId == null) return;
+    if (_currentDoctorId == null || currentMonth == null) return;
 
-    // Delete existing requests for this doctor
-    final existingRequests = await _dbHelper.getDoctorRequestsByDoctorId(_currentDoctorId!);
-    for (final request in existingRequests) {
-      if (request.id != null) {
-        await _dbHelper.deleteDoctorRequest(request.id!);
-      }
-    }
+    // ✅ Delete only current month's requests
+    await _dbHelper.deleteDoctorRequestsByDoctorIdAndMonth(_currentDoctorId!, currentMonth!);
 
     // Insert new requests
     final allRequests = [..._wantedDays, ..._exceptionDays];
     for (final request in allRequests) {
       await _dbHelper.insertDoctorRequest(request);
     }
-
-    _doctorRequests[_currentDoctorId!] = allRequests;
   }
 
   /// Complete constraints automatically (for doctors who dropped all shifts)

@@ -314,7 +314,14 @@ class DatabaseHelper {
       return {'success': false, 'message': 'Sign in failed: $e'};
     }
   }
-
+  Future<void> deleteDoctorRequestsByDoctorIdAndMonth(int doctorId, String month) async {
+    final db = await database;
+    await db.delete(
+      'doctor_requests',
+      where: 'doctor_id = ? AND date LIKE ?',
+      whereArgs: [doctorId, '$month%'],  // e.g., "2025-02%"
+    );
+  }
   /// Check if user exists by email or username
   Future<bool> userExists(String emailOrUsername) async {
     try {
